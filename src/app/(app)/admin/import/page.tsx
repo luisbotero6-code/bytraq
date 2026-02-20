@@ -6,12 +6,22 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { format } from "date-fns";
+import { sv } from "date-fns/locale";
+import * as XLSX from "xlsx";
 
 // --- Types ---
 
 interface ColumnDef {
   key: string;
   label: string;
+  /** Alternative header names to match against (case-insensitive) */
+  aliases?: string[];
+}
+
+interface ParseResult {
+  headers: string[];
+  rows: Record<string, string>[];
 }
 
 interface ImportSectionProps {
@@ -29,25 +39,114 @@ function detectSeparator(text: string): string {
   return ",";
 }
 
-function parseData(text: string, columns: ColumnDef[]): Record<string, string>[] {
+/** Split a CSV/TSV line respecting quoted fields (handles separators inside quotes) */
+function splitLine(line: string, sep: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++; // skip escaped quote
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === sep) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+/** Normalize header text for matching: lowercase, trim, collapse spaces */
+function norm(s: string): string {
+  return s.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+/** Check if an actual header exactly matches a column definition */
+function headerMatchesExact(actual: string, col: ColumnDef): boolean {
+  const a = norm(actual);
+  const candidates = [col.label, ...(col.aliases ?? [])].map(norm);
+  return candidates.some(c => a === c);
+}
+
+/** Check if an actual header fuzzy-matches a column definition (prefix) */
+function headerMatchesFuzzy(actual: string, col: ColumnDef): boolean {
+  const a = norm(actual);
+  const candidates = [col.label, ...(col.aliases ?? [])].map(norm);
+  return candidates.some(c => a.startsWith(c) || c.startsWith(a));
+}
+
+function parseData(text: string, columns: ColumnDef[]): ParseResult {
   const sep = detectSeparator(text);
   const lines = text.trim().split("\n").filter(Boolean);
-  if (lines.length === 0) return [];
+  if (lines.length === 0) return { headers: [], rows: [] };
 
-  // Check if first line looks like a header (matches column labels)
-  const firstCells = lines[0].split(sep).map(c => c.trim().toLowerCase());
-  const colLabels = columns.map(c => c.label.toLowerCase());
-  const hasHeader = colLabels.every(label => firstCells.some(cell => cell === label));
-  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const firstCells = splitLine(lines[0], sep);
 
-  return dataLines.map(line => {
-    const cells = line.split(sep).map(c => c.trim());
+  // Two-pass matching: exact first, then fuzzy on remaining unmatched
+  const headerMap = new Map<string, number>(); // column key → index in actual data
+  const usedIndices = new Set<number>();
+
+  // Pass 1: exact matches
+  for (const col of columns) {
+    const idx = firstCells.findIndex((cell, i) => !usedIndices.has(i) && headerMatchesExact(cell, col));
+    if (idx !== -1) {
+      headerMap.set(col.key, idx);
+      usedIndices.add(idx);
+    }
+  }
+
+  // Pass 2: fuzzy matches for unmatched columns against unmatched headers
+  for (const col of columns) {
+    if (headerMap.has(col.key)) continue;
+    const idx = firstCells.findIndex((cell, i) => !usedIndices.has(i) && headerMatchesFuzzy(cell, col));
+    if (idx !== -1) {
+      headerMap.set(col.key, idx);
+      usedIndices.add(idx);
+    }
+  }
+
+  // If we matched at least half the columns by header name, use header-based mapping
+  const useHeaders = headerMap.size >= Math.ceil(columns.length / 2);
+
+  if (useHeaders) {
+    const dataLines = lines.slice(1);
+    const rows = dataLines.map(line => {
+      const cells = splitLine(line, sep);
+      const row: Record<string, string> = {};
+      for (const col of columns) {
+        const idx = headerMap.get(col.key);
+        row[col.key] = idx !== undefined ? (cells[idx] ?? "") : "";
+      }
+      return row;
+    });
+    return { headers: firstCells, rows };
+  }
+
+  // Fallback: positional mapping, no header row detected
+  const rows = lines.map(line => {
+    const cells = splitLine(line, sep);
     const row: Record<string, string> = {};
     columns.forEach((col, i) => {
       row[col.key] = cells[i] ?? "";
     });
     return row;
   });
+  return { headers: [], rows };
 }
 
 // --- ImportSection Component ---
@@ -55,22 +154,38 @@ function parseData(text: string, columns: ColumnDef[]): Record<string, string>[]
 function ImportSection({ columns, onImport, importLabel }: ImportSectionProps) {
   const [text, setText] = useState("");
   const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleParse = useCallback((value: string) => {
     setText(value);
     if (value.trim()) {
-      setRows(parseData(value, columns));
+      const result = parseData(value, columns);
+      setRows(result.rows);
+      setDetectedHeaders(result.headers);
     } else {
       setRows([]);
+      setDetectedHeaders([]);
     }
   }, [columns]);
 
   const handleFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const content = await file.text();
+
+    const isExcel = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
+    let content: string;
+
+    if (isExcel) {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array", cellDates: true, cellText: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      content = XLSX.utils.sheet_to_csv(sheet, { FS: "\t", rawNumbers: false });
+    } else {
+      content = await file.text();
+    }
+
     handleParse(content);
     if (fileRef.current) fileRef.current.value = "";
   }, [handleParse]);
@@ -101,7 +216,7 @@ function ImportSection({ columns, onImport, importLabel }: ImportSectionProps) {
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.tsv,.txt"
+          accept=".csv,.tsv,.txt,.xlsx,.xls"
           onChange={handleFile}
           className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
         />
@@ -151,24 +266,31 @@ function ImportSection({ columns, onImport, importLabel }: ImportSectionProps) {
 // --- Column definitions ---
 
 const employeeColumns: ColumnDef[] = [
-  { key: "name", label: "Namn" },
-  { key: "costPerHour", label: "Kostnad/h" },
-  { key: "pricePerHour", label: "Pris/h" },
-  { key: "weeklyHours", label: "Timmar/vecka" },
-  { key: "targetUtilization", label: "Målbeläggning" },
+  { key: "anstId", label: "Anst. ID", aliases: ["Anst.ID", "AnstID"] },
+  { key: "fornamn", label: "Förnamn" },
+  { key: "efternamn", label: "Efternamn" },
+  { key: "personnummer", label: "Personnummer" },
+  { key: "kostnadH", label: "Kostnad/h" },
+  { key: "malbelaggning", label: "Målbeläggning", aliases: ["målbeläggning"] },
+  { key: "timmarVecka", label: "Timmar/vecka", aliases: ["timmar/vecka"] },
 ];
 
 const customerColumns: ColumnDef[] = [
-  { key: "name", label: "Namn" },
-  { key: "orgnr", label: "Orgnr" },
-  { key: "customerType", label: "Typ" },
-  { key: "clientManagerName", label: "Klientansvarig" },
+  { key: "kundnr", label: "Kundnr" },
+  { key: "namn", label: "Namn" },
+  { key: "orgnr", label: "Org-/Persnr" },
+  { key: "postnr", label: "Postnr" },
+  { key: "ort", label: "Ort" },
+  { key: "land", label: "Land" },
+  { key: "telefon", label: "Telefon" },
 ];
 
 const articleColumns: ColumnDef[] = [
-  { key: "code", label: "Kod" },
-  { key: "name", label: "Namn" },
-  { key: "groupName", label: "Grupp" },
+  { key: "artikelnr", label: "Artikelnr", aliases: ["Artikelnummer"] },
+  { key: "benamning", label: "Benämning" },
+  { key: "utpris", label: "Utpris Prislista A", aliases: ["Utpris"] },
+  { key: "grupp", label: "Grupp" },
+  { key: "status", label: "Status", aliases: ["Aktiv"] },
 ];
 
 const timeEntryColumns: ColumnDef[] = [
@@ -207,20 +329,103 @@ function parseNum(value: string): number {
   return Number(value.replace(/\s/g, "").replace(",", "."));
 }
 
-function parseCustomerType(value: string): "LOPANDE" | "FASTPRIS" | "BLANDAD" {
-  const v = value.toLowerCase().trim();
-  if (v === "fastpris" || v === "fast") return "FASTPRIS";
-  if (v === "blandad" || v === "bland") return "BLANDAD";
-  return "LOPANDE";
+// --- Import History ---
+
+const typeLabels: Record<string, string> = {
+  EMPLOYEE: "Anställda",
+  CUSTOMER: "Kunder",
+  ARTICLE: "Artiklar",
+  TIME_ENTRY: "Tidsredovisning",
+  ABSENCE: "Frånvaro",
+};
+
+function ImportHistory() {
+  const utils = trpc.useUtils();
+  const { data: batches, isLoading } = trpc.import.listBatches.useQuery();
+  const deleteBatch = trpc.import.deleteBatch.useMutation({
+    onSuccess: () => {
+      utils.import.listBatches.invalidate();
+    },
+  });
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Är du säker? Alla poster som skapades i denna import kommer att raderas.")) return;
+    setDeletingId(id);
+    try {
+      const result = await deleteBatch.mutateAsync({ id });
+      toast.success(`${result.deleted} poster raderade`);
+    } catch {
+      toast.error("Kunde inte radera importbatch");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground py-4">Laddar...</p>;
+  }
+
+  if (!batches || batches.length === 0) {
+    return <p className="text-sm text-muted-foreground py-4">Inga importer registrerade ännu.</p>;
+  }
+
+  return (
+    <div className="rounded-md border overflow-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Typ</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Antal</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Importerad av</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Datum</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {batches.map(batch => (
+            <tr key={batch.id} className="border-t">
+              <td className="px-3 py-2">{typeLabels[batch.type] ?? batch.type}</td>
+              <td className="px-3 py-2">{batch.count}</td>
+              <td className="px-3 py-2">{batch.createdBy.name}</td>
+              <td className="px-3 py-2">
+                {format(new Date(batch.createdAt), "d MMM yyyy HH:mm", { locale: sv })}
+              </td>
+              <td className="px-3 py-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={deletingId === batch.id}
+                  onClick={() => handleDelete(batch.id)}
+                >
+                  {deletingId === batch.id ? "Raderar..." : "Ta bort"}
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 // --- Page ---
 
 export default function ImportPage() {
-  const importEmployees = trpc.import.importEmployees.useMutation();
-  const importCustomers = trpc.import.importCustomers.useMutation();
-  const importArticles = trpc.import.importArticles.useMutation();
-  const importTimeEntries = trpc.import.importTimeEntries.useMutation();
+  const utils = trpc.useUtils();
+  const importEmployees = trpc.import.importEmployees.useMutation({
+    onSuccess: () => utils.import.listBatches.invalidate(),
+  });
+  const importCustomers = trpc.import.importCustomers.useMutation({
+    onSuccess: () => utils.import.listBatches.invalidate(),
+  });
+  const importArticles = trpc.import.importArticles.useMutation({
+    onSuccess: () => utils.import.listBatches.invalidate(),
+  });
+  const importTimeEntries = trpc.import.importTimeEntries.useMutation({
+    onSuccess: () => utils.import.listBatches.invalidate(),
+  });
 
   return (
     <div>
@@ -231,6 +436,7 @@ export default function ImportPage() {
           <TabsTrigger value="customers">Kunder</TabsTrigger>
           <TabsTrigger value="articles">Artiklar</TabsTrigger>
           <TabsTrigger value="time-entries">Tidsredovisning</TabsTrigger>
+          <TabsTrigger value="history">Importhistorik</TabsTrigger>
         </TabsList>
 
         <TabsContent value="employees">
@@ -239,11 +445,17 @@ export default function ImportPage() {
             importLabel="anställda"
             onImport={async (rows) => {
               const data = rows.map(r => ({
-                name: r.name,
-                costPerHour: Number(r.costPerHour),
-                defaultPricePerHour: Number(r.pricePerHour),
-                weeklyHours: Number(r.weeklyHours),
-                targetUtilization: Number(r.targetUtilization),
+                employeeNumber: r.anstId || undefined,
+                name: [r.fornamn, r.efternamn].filter(Boolean).join(" "),
+                personalNumber: r.personnummer || undefined,
+                costPerHour: parseNum(r.kostnadH) || 0,
+                defaultPricePerHour: parseNum(r.kostnadH) || 0,
+                weeklyHours: parseNum(r.timmarVecka) || 40,
+                targetUtilization: (() => {
+                  const v = parseNum(r.malbelaggning);
+                  if (!v || isNaN(v)) return 0.75;
+                  return v > 1 ? v / 100 : v;
+                })(),
               }));
               const result = await importEmployees.mutateAsync(data);
               toast.success(`${result.count} anställda importerade`);
@@ -257,10 +469,13 @@ export default function ImportPage() {
             importLabel="kunder"
             onImport={async (rows) => {
               const data = rows.map(r => ({
-                name: r.name,
-                orgnr: r.orgnr,
-                customerType: parseCustomerType(r.customerType),
-                clientManagerName: r.clientManagerName || undefined,
+                customerNumber: r.kundnr || undefined,
+                name: r.namn,
+                orgnr: r.orgnr || undefined,
+                postalCode: r.postnr || undefined,
+                city: r.ort || undefined,
+                country: r.land || undefined,
+                phone: r.telefon || undefined,
               }));
               const result = await importCustomers.mutateAsync(data);
               toast.success(`${result.count} kunder importerade`);
@@ -274,19 +489,17 @@ export default function ImportPage() {
             importLabel="artiklar"
             onImport={async (rows) => {
               const data = rows.map(r => ({
-                code: r.code,
-                name: r.name,
-                groupName: r.groupName,
+                code: r.artikelnr,
+                name: r.benamning,
+                defaultPrice: parseNum(r.utpris) || undefined,
+                groupName: r.grupp,
               }));
               const result = await importArticles.mutateAsync(data);
-              if (result.skipped.length > 0) {
-                toast.warning(`${result.count} artiklar importerade, ${result.skipped.length} överhoppade`, {
-                  description: result.skipped.join("\n"),
-                  duration: 10000,
-                });
-              } else {
-                toast.success(`${result.count} artiklar importerade`);
+              let msg = `${result.count} artiklar importerade`;
+              if (result.createdGroups.length > 0) {
+                msg += ` (nya grupper: ${result.createdGroups.join(", ")})`;
               }
+              toast.success(msg);
             }}
           />
         </TabsContent>
@@ -296,29 +509,36 @@ export default function ImportPage() {
             columns={timeEntryColumns}
             importLabel="tidsrader"
             onImport={async (rows) => {
-              const data = rows
-                .filter(r => parseNum(r.arbH) > 0)
-                .map(r => ({
-                  employeeName: r.anvandare,
-                  customerName: r.kund,
-                  articleCode: r.artikelNr,
-                  date: r.datum,
-                  hours: parseNum(r.arbH),
+              const data = rows.map(r => ({
+                  employeeName: r.anvandare || "",
+                  customerNumber: r.kundNr || undefined,
+                  customerName: r.kund || "",
+                  articleCode: r.artikelNr || "",
+                  date: r.datum || "",
+                  hours: parseNum(r.arbH) || parseNum(r.franvH) || parseNum(r.debH) || parseNum(r.antOvr),
+                  regKod: r.regKod || undefined,
                   costAmount: parseNum(r.kostnad) || undefined,
                   price: parseNum(r.pris) || undefined,
                   comment: [r.fakturatext, r.anteckning].filter(Boolean).join(" | ") || undefined,
                 }));
               const result = await importTimeEntries.mutateAsync(data);
+              const msgs: string[] = [];
+              if (result.count > 0) msgs.push(`${result.count} tidsrader`);
+              if (result.absenceCount > 0) msgs.push(`${result.absenceCount} frånvaroposter`);
               if (result.skipped.length > 0) {
-                toast.warning(`${result.count} tidsrader importerade, ${result.skipped.length} överhoppade`, {
+                toast.warning(`${msgs.join(" + ")} importerade, ${result.skipped.length} överhoppade`, {
                   description: result.skipped.join("\n"),
                   duration: 10000,
                 });
               } else {
-                toast.success(`${result.count} tidsrader importerade`);
+                toast.success(`${msgs.join(" + ")} importerade`);
               }
             }}
           />
+        </TabsContent>
+
+        <TabsContent value="history">
+          <ImportHistory />
         </TabsContent>
       </Tabs>
     </div>

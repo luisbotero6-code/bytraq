@@ -12,9 +12,12 @@ import { taskRouter } from "./routers/task";
 import { dataQualityRouter } from "./routers/data-quality";
 import { auditRouter } from "./routers/audit";
 import { importRouter } from "./routers/import";
+import { calendarRouter } from "./routers/calendar";
+import { absenceRouter } from "./routers/absence";
 
 export const appRouter = router({
   timeEntry: timeEntryRouter,
+  absence: absenceRouter,
   budget: budgetRouter,
   customer: customerRouter,
   employee: employeeRouter,
@@ -27,6 +30,7 @@ export const appRouter = router({
   dataQuality: dataQualityRouter,
   audit: auditRouter,
   import: importRouter,
+  calendar: calendarRouter,
 });
 
 export type AppRouter = typeof appRouter;
