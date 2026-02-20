@@ -15,6 +15,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { AbsenceDialog } from "./absence-dialog";
+import { TimeEntryDialog } from "./time-entry-dialog";
+import { ABSENCE_CODES } from "@/lib/constants";
 
 interface WeekRow {
   customerId: string;
@@ -41,6 +44,16 @@ export function WeekView() {
     { employeeId: employeeId!, weekStart: weekStartStr },
     { enabled: !!employeeId }
   );
+
+  const { data: weekAbsences, refetch: refetchAbsences } = trpc.absence.getWeek.useQuery(
+    { employeeId: employeeId!, weekStart: weekStartStr },
+    { enabled: !!employeeId }
+  );
+
+  const deleteAbsenceMutation = trpc.absence.delete.useMutation({
+    onSuccess: () => { refetchAbsences(); toast.success("Frånvaro borttagen"); },
+    onError: (err) => toast.error(err.message),
+  });
 
   const { data: customers } = trpc.customer.list.useQuery();
   const { data: articles } = trpc.article.list.useQuery();
@@ -184,10 +197,45 @@ export function WeekView() {
   const rowTotals = rows.map((r) =>
     r.hours.reduce<number>((sum, h) => sum + (h ?? 0), 0)
   );
+  const absenceDayTotals = days.map((_, di) =>
+    (weekAbsences ?? [])
+      .filter((a) => {
+        const idx = Math.round((new Date(a.date).getTime() - weekStart.getTime()) / (1000 * 60 * 60 * 24));
+        return idx === di;
+      })
+      .reduce((sum, a) => sum + Number(a.hours), 0)
+  );
   const dayTotals = days.map((_, di) =>
-    rows.reduce((sum, r) => sum + (r.hours[di] ?? 0), 0)
+    rows.reduce((sum, r) => sum + (r.hours[di] ?? 0), 0) + absenceDayTotals[di]
   );
   const grandTotal = dayTotals.reduce((sum, t) => sum + t, 0);
+
+  // Group absences by code for display in the table
+  const absenceRows = (() => {
+    if (!weekAbsences?.length) return [];
+    const map = new Map<string, { code: string; label: string; hours: (number | null)[]; ids: (string | undefined)[] }>();
+    for (const a of weekAbsences) {
+      const key = a.code ?? a.reason;
+      if (!map.has(key)) {
+        const codeInfo = ABSENCE_CODES.find((ac) => ac.code === a.code);
+        map.set(key, {
+          code: a.code ?? a.reason,
+          label: codeInfo?.label ?? a.reason,
+          hours: Array(7).fill(null),
+          ids: Array(7).fill(undefined),
+        });
+      }
+      const row = map.get(key)!;
+      const dayIndex = Math.round(
+        (new Date(a.date).getTime() - weekStart.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      if (dayIndex >= 0 && dayIndex < 7) {
+        row.hours[dayIndex] = Number(a.hours);
+        row.ids[dayIndex] = a.id;
+      }
+    }
+    return Array.from(map.values());
+  })();
 
   return (
     <div className="space-y-4">
@@ -297,6 +345,32 @@ export function WeekView() {
                 </td>
               </tr>
             ))}
+            {absenceRows.map((aRow, ai) => (
+              <tr key={`abs-${ai}`} className="border-b border-dashed bg-muted/30">
+                <td colSpan={2} className="p-2 text-xs text-muted-foreground">
+                  {aRow.code} — {aRow.label}
+                </td>
+                {days.map((_, di) => (
+                  <td key={di} className="p-2 text-center text-xs text-muted-foreground">
+                    {aRow.hours[di] != null ? (
+                      <span className="inline-flex items-center gap-1">
+                        {aRow.hours[di]!.toFixed(1)}
+                        <button
+                          className="text-muted-foreground/50 hover:text-destructive text-[10px]"
+                          onClick={() => aRow.ids[di] && deleteAbsenceMutation.mutate(aRow.ids[di]!)}
+                          title="Ta bort"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ) : ""}
+                  </td>
+                ))}
+                <td className="p-2 text-center text-xs text-muted-foreground font-medium">
+                  {aRow.hours.reduce<number>((s, h) => s + (h ?? 0), 0).toFixed(1)}
+                </td>
+              </tr>
+            ))}
             <tr className="border-t-2 font-medium">
               <td colSpan={2} className="p-2 text-right text-xs">
                 Summa
@@ -314,9 +388,13 @@ export function WeekView() {
         </table>
       </div>
 
-      <Button variant="outline" size="sm" onClick={addRow}>
-        + Ny rad
-      </Button>
+      <div className="flex items-center gap-2">
+        <TimeEntryDialog onSaved={() => refetch()} />
+        <AbsenceDialog onSaved={() => refetchAbsences()} />
+        <Button variant="outline" size="sm" onClick={addRow}>
+          + Ny rad
+        </Button>
+      </div>
     </div>
   );
 }

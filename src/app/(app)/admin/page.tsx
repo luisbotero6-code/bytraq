@@ -14,6 +14,7 @@ const adminLinks = [
   { href: "/admin/calendar", title: "Kalender", description: "Helgdagar och arbetstider" },
   { href: "/admin/audit-log", title: "Revisionslogg", description: "Spårbarhet och ändringslogg" },
   { href: "/admin/import", title: "Dataimport", description: "Importera historisk data från Excel/CSV" },
+  { href: "/admin/absence-codes", title: "Frånvarokoder", description: "Registreringskoder för frånvaro och lönearter" },
 ];
 
 export default function AdminPage() {

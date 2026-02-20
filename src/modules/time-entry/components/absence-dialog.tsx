@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { format } from "date-fns";
+import { format, differenceInCalendarDays } from "date-fns";
 import { trpc } from "@/lib/trpc";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { ABSENCE_CODES } from "@/lib/constants";
@@ -26,7 +26,7 @@ import {
 import { toast } from "sonner";
 
 interface AbsenceDialogProps {
-  date: Date;
+  date?: Date;
   onSaved: () => void;
 }
 
@@ -38,6 +38,17 @@ export function AbsenceDialog({ date, onSaved }: AbsenceDialogProps) {
   const [code, setCode] = useState("");
   const [hours, setHours] = useState(8);
   const [comment, setComment] = useState("");
+  const [startDate, setStartDate] = useState(() =>
+    format(date ?? new Date(), "yyyy-MM-dd"),
+  );
+  const [endDate, setEndDate] = useState(() =>
+    format(date ?? new Date(), "yyyy-MM-dd"),
+  );
+
+  const isRange = startDate !== endDate && startDate && endDate && endDate >= startDate;
+  const dayCount = isRange
+    ? differenceInCalendarDays(new Date(endDate), new Date(startDate)) + 1
+    : null;
 
   const createMutation = trpc.absence.create.useMutation({
     onSuccess: () => {
@@ -49,10 +60,25 @@ export function AbsenceDialog({ date, onSaved }: AbsenceDialogProps) {
     onError: (err) => toast.error(err.message),
   });
 
+  const createRangeMutation = trpc.absence.createRange.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Frånvaro registrerad för ${result.count} vardagar`);
+      setOpen(false);
+      resetForm();
+      onSaved();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const isPending = createMutation.isPending || createRangeMutation.isPending;
+
   function resetForm() {
     setCode("");
     setHours(8);
     setComment("");
+    const d = format(date ?? new Date(), "yyyy-MM-dd");
+    setStartDate(d);
+    setEndDate(d);
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -62,14 +88,29 @@ export function AbsenceDialog({ date, onSaved }: AbsenceDialogProps) {
       toast.error("Välj en registreringskod");
       return;
     }
+    if (endDate < startDate) {
+      toast.error("Slutdatum kan inte vara före startdatum");
+      return;
+    }
 
-    createMutation.mutate({
-      employeeId,
-      date: format(date, "yyyy-MM-dd"),
-      code,
-      hours,
-      comment: comment || null,
-    });
+    if (isRange) {
+      createRangeMutation.mutate({
+        employeeId,
+        startDate,
+        endDate,
+        code,
+        hours,
+        comment: comment || null,
+      });
+    } else {
+      createMutation.mutate({
+        employeeId,
+        date: startDate,
+        code,
+        hours,
+        comment: comment || null,
+      });
+    }
   }
 
   return (
@@ -99,7 +140,29 @@ export function AbsenceDialog({ date, onSaved }: AbsenceDialogProps) {
           </div>
 
           <div className="space-y-2">
-            <Label>Timmar</Label>
+            <Label>Datum</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <span className="text-muted-foreground">–</span>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+            {dayCount && dayCount > 1 && (
+              <p className="text-xs text-muted-foreground">
+                {dayCount} dagar (helger exkluderas)
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Timmar per dag</Label>
             <Input
               type="number"
               step="0.25"
@@ -119,12 +182,8 @@ export function AbsenceDialog({ date, onSaved }: AbsenceDialogProps) {
             />
           </div>
 
-          <div className="text-sm text-muted-foreground">
-            Datum: {format(date, "yyyy-MM-dd")}
-          </div>
-
-          <Button type="submit" className="w-full" disabled={createMutation.isPending}>
-            {createMutation.isPending ? "Sparar..." : "Registrera frånvaro"}
+          <Button type="submit" className="w-full" disabled={isPending}>
+            {isPending ? "Sparar..." : "Registrera frånvaro"}
           </Button>
         </form>
       </DialogContent>

@@ -228,6 +228,17 @@ export function BudgetUploadDialog({ year, month, onImported }: BudgetUploadDial
                         </tr>
                       );
                     })}
+                    <tr className="border-t bg-muted/50 font-semibold">
+                      <td className="px-3 py-1.5" />
+                      <td className="px-3 py-1.5" />
+                      <td className="px-3 py-1.5 text-right">Summa</td>
+                      <td className="px-3 py-1.5 text-right">
+                        {rows.reduce((sum, r) => sum + parseNum(r.fastpris ?? ""), 0).toLocaleString("sv-SE")}
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        {rows.reduce((sum, r) => sum + parseNum(r.timmar ?? ""), 0).toLocaleString("sv-SE")}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
