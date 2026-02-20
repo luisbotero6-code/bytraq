@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../index";
+import { budgetEffectiveAtWhere, deduplicateBudgetEntries } from "@/server/services/budget-query";
 
 export const kpiRouter = router({
   dashboard: protectedProcedure
@@ -25,8 +26,8 @@ export const kpiRouter = router({
           include: { article: { include: { articleGroup: true } }, customer: true },
         }),
         ctx.db.budgetEntry.findMany({
-          where: { year: input.year, month: input.month, status: "PUBLISHED" },
-        }),
+          where: budgetEffectiveAtWhere(input.year, input.month),
+        }).then(deduplicateBudgetEntries),
         ctx.db.employee.findMany({
           where: { active: true, ...(input.employeeId ? { id: input.employeeId } : {}) },
         }),
@@ -95,9 +96,9 @@ export const kpiRouter = router({
           include: { article: { include: { articleGroup: true } }, employee: true },
         }),
         ctx.db.budgetEntry.findMany({
-          where: { customerId: input.customerId, year: input.year, month: input.month, status: "PUBLISHED" },
+          where: budgetEffectiveAtWhere(input.year, input.month, { customerId: input.customerId }),
           include: { article: true },
-        }),
+        }).then(deduplicateBudgetEntries),
         ctx.db.customer.findUniqueOrThrow({
           where: { id: input.customerId },
           include: { manager: true },
@@ -167,8 +168,8 @@ export const kpiRouter = router({
           where: { customerId: { in: customerIds }, date: { gte: startDate, lte: endDate } },
         }),
         ctx.db.budgetEntry.findMany({
-          where: { customerId: { in: customerIds }, year: input.year, month: input.month, status: "PUBLISHED" },
-        }),
+          where: budgetEffectiveAtWhere(input.year, input.month, { customerId: { in: customerIds } }),
+        }).then(deduplicateBudgetEntries),
       ]);
 
       return customers.map(c => {

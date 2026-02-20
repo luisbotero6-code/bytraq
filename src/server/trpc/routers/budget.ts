@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, requireRole } from "../index";
 import { TRPCError } from "@trpc/server";
+import { budgetEffectiveAtWhere, deduplicateBudgetEntries } from "@/server/services/budget-query";
 
 export const budgetRouter = router({
   list: protectedProcedure
@@ -10,37 +11,62 @@ export const budgetRouter = router({
       status: z.enum(["DRAFT", "PUBLISHED"]).optional(),
     }))
     .query(async ({ ctx, input }) => {
-      return ctx.db.budgetEntry.findMany({
-        where: {
-          year: input.year,
-          month: input.month,
-          ...(input.status ? { status: input.status } : {}),
-        },
-        include: { customer: true, article: true },
-        orderBy: [{ customer: { name: "asc" } }, { article: { code: "asc" } }],
-      });
+      if (input.status === "DRAFT") {
+        // Drafts: show exact period match
+        return ctx.db.budgetEntry.findMany({
+          where: {
+            startYear: input.year,
+            startMonth: input.month,
+            status: "DRAFT",
+          },
+          include: { customer: true, article: true },
+          orderBy: [{ customer: { name: "asc" } }, { article: { code: "asc" } }],
+        });
+      }
+
+      if (input.status === "PUBLISHED") {
+        // Published: show entries effective at this period
+        const entries = await ctx.db.budgetEntry.findMany({
+          where: budgetEffectiveAtWhere(input.year, input.month),
+          include: { customer: true, article: true },
+          orderBy: [{ customer: { name: "asc" } }, { article: { code: "asc" } }],
+        });
+        return deduplicateBudgetEntries(entries);
+      }
+
+      // No status filter: return both drafts (exact match) and published (effective)
+      const [drafts, published] = await Promise.all([
+        ctx.db.budgetEntry.findMany({
+          where: {
+            startYear: input.year,
+            startMonth: input.month,
+            status: "DRAFT",
+          },
+          include: { customer: true, article: true },
+          orderBy: [{ customer: { name: "asc" } }, { article: { code: "asc" } }],
+        }),
+        ctx.db.budgetEntry.findMany({
+          where: budgetEffectiveAtWhere(input.year, input.month),
+          include: { customer: true, article: true },
+          orderBy: [{ customer: { name: "asc" } }, { article: { code: "asc" } }],
+        }),
+      ]);
+
+      return [...drafts, ...deduplicateBudgetEntries(published)];
     }),
 
   upsert: protectedProcedure
     .use(requireRole("ADMIN", "BYRALEDNING", "TEAM_LEAD"))
     .input(z.object({
       id: z.string().optional(),
-      year: z.number(),
-      month: z.number().min(1).max(12),
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
       customerId: z.string(),
       articleId: z.string(),
       hours: z.number().min(0),
       amount: z.number().min(0).default(0),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Check period lock
-      const lock = await ctx.db.periodLock.findUnique({
-        where: { year_month: { year: input.year, month: input.month } },
-      });
-      if (lock && !lock.unlockedAt) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Perioden är låst" });
-      }
-
       if (input.id) {
         return ctx.db.budgetEntry.update({
           where: { id: input.id },
@@ -50,8 +76,8 @@ export const budgetRouter = router({
 
       return ctx.db.budgetEntry.create({
         data: {
-          year: input.year,
-          month: input.month,
+          startYear: input.startYear,
+          startMonth: input.startMonth,
           customerId: input.customerId,
           articleId: input.articleId,
           hours: input.hours,
@@ -64,29 +90,45 @@ export const budgetRouter = router({
   publish: protectedProcedure
     .use(requireRole("ADMIN", "BYRALEDNING"))
     .input(z.object({
-      year: z.number(),
-      month: z.number().min(1).max(12),
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
     }))
     .mutation(async ({ ctx, input }) => {
       return ctx.db.$transaction(async (tx) => {
         const drafts = await tx.budgetEntry.findMany({
-          where: { year: input.year, month: input.month, status: "DRAFT" },
+          where: { startYear: input.startYear, startMonth: input.startMonth, status: "DRAFT" },
         });
 
         if (drafts.length === 0) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Inga utkast att publicera" });
         }
 
-        // Get current max version for published entries
+        // Get current max version
         const maxVersion = await tx.budgetEntry.aggregate({
-          where: { year: input.year, month: input.month, status: "PUBLISHED" },
+          where: { startYear: input.startYear, startMonth: input.startMonth, status: "PUBLISHED" },
           _max: { version: true },
         });
         const nextVersion = (maxVersion._max.version ?? 0) + 1;
 
-        // Update all drafts to published
+        // Auto-close open PUBLISHED entries for the same customer+article combos
+        const endMonth = input.startMonth === 1 ? 12 : input.startMonth - 1;
+        const endYear = input.startMonth === 1 ? input.startYear - 1 : input.startYear;
+
+        for (const draft of drafts) {
+          await tx.budgetEntry.updateMany({
+            where: {
+              customerId: draft.customerId,
+              articleId: draft.articleId,
+              status: "PUBLISHED",
+              endYear: null,
+            },
+            data: { endYear, endMonth },
+          });
+        }
+
+        // Update drafts → published
         await tx.budgetEntry.updateMany({
-          where: { year: input.year, month: input.month, status: "DRAFT" },
+          where: { startYear: input.startYear, startMonth: input.startMonth, status: "DRAFT" },
           data: { status: "PUBLISHED", version: nextVersion },
         });
 
@@ -94,34 +136,88 @@ export const budgetRouter = router({
       });
     }),
 
-  copyFromPreviousMonth: protectedProcedure
-    .use(requireRole("ADMIN", "BYRALEDNING", "TEAM_LEAD"))
+  endBudget: protectedProcedure
+    .use(requireRole("ADMIN", "BYRALEDNING"))
     .input(z.object({
-      year: z.number(),
-      month: z.number().min(1).max(12),
+      customerId: z.string(),
+      endYear: z.number(),
+      endMonth: z.number().min(1).max(12),
     }))
     .mutation(async ({ ctx, input }) => {
-      const prevMonth = input.month === 1 ? 12 : input.month - 1;
-      const prevYear = input.month === 1 ? input.year - 1 : input.year;
-
-      const prevEntries = await ctx.db.budgetEntry.findMany({
-        where: { year: prevYear, month: prevMonth, status: "PUBLISHED" },
+      const result = await ctx.db.budgetEntry.updateMany({
+        where: {
+          customerId: input.customerId,
+          status: "PUBLISHED",
+          endYear: null,
+        },
+        data: {
+          endYear: input.endYear,
+          endMonth: input.endMonth,
+        },
       });
 
-      if (prevEntries.length === 0) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Ingen publicerad budget att kopiera" });
+      return { closed: result.count };
+    }),
+
+  history: protectedProcedure
+    .input(z.object({
+      customerId: z.string(),
+    }))
+    .query(async ({ ctx, input }) => {
+      return ctx.db.budgetEntry.findMany({
+        where: {
+          customerId: input.customerId,
+          status: "PUBLISHED",
+        },
+        include: { article: true },
+        orderBy: [{ startYear: "desc" }, { startMonth: "desc" }, { article: { code: "asc" } }],
+      });
+    }),
+
+  importFile: protectedProcedure
+    .use(requireRole("ADMIN", "BYRALEDNING", "TEAM_LEAD"))
+    .input(z.object({
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
+      customerId: z.string(),
+      rows: z.array(z.object({
+        articleCode: z.string(),
+        hours: z.number().min(0),
+        amount: z.number().min(0),
+      })),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Build article code → id map (case-insensitive)
+      const articles = await ctx.db.article.findMany({ where: { active: true } });
+      const articleMap = new Map<string, string>();
+      for (const a of articles) {
+        articleMap.set(a.code.toLowerCase(), a.id);
       }
 
-      const newEntries = prevEntries.map(e => ({
-        year: input.year,
-        month: input.month,
-        customerId: e.customerId,
-        articleId: e.articleId,
-        hours: e.hours,
-        amount: e.amount,
-        status: "DRAFT" as const,
-      }));
+      const data: { startYear: number; startMonth: number; customerId: string; articleId: string; hours: number; amount: number; status: "DRAFT" }[] = [];
+      const skipped: string[] = [];
 
-      return ctx.db.budgetEntry.createMany({ data: newEntries, skipDuplicates: true });
+      for (const row of input.rows) {
+        const articleId = articleMap.get(row.articleCode.toLowerCase());
+        if (!articleId) {
+          skipped.push(row.articleCode);
+          continue;
+        }
+        data.push({
+          startYear: input.startYear,
+          startMonth: input.startMonth,
+          customerId: input.customerId,
+          articleId,
+          hours: row.hours,
+          amount: row.amount,
+          status: "DRAFT",
+        });
+      }
+
+      if (data.length > 0) {
+        await ctx.db.budgetEntry.createMany({ data, skipDuplicates: true });
+      }
+
+      return { count: data.length, skipped };
     }),
 });
