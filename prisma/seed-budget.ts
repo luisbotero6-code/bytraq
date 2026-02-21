@@ -29,11 +29,26 @@ const prisma = new PrismaClient({ adapter });
 
 // ---------- helpers ----------
 
-/** Parse Swedish number format: "2 666,67" → 2666.67, "- kr" or empty → 0 */
+/** Parse number in Swedish ("2 666,67") or English ("1,677.69") format → 2666.67 */
 function parseNum(s: string): number {
   if (!s) return 0;
-  const cleaned = s.replace(/\s/g, "").replace("kr", "").replace(/−/g, "-").replace(",", ".").trim();
+  let cleaned = s.replace(/\s/g, "").replace(/kr/gi, "").replace(/−/g, "-").trim();
   if (!cleaned || cleaned === "-") return 0;
+  // If value has both comma and dot, detect format:
+  // "1,677.69" = English (comma is thousands) → strip commas
+  // "1.677,69" = European (dot is thousands) → strip dots, comma→dot
+  if (cleaned.includes(",") && cleaned.includes(".")) {
+    if (cleaned.lastIndexOf(",") < cleaned.lastIndexOf(".")) {
+      // English: 1,677.69
+      cleaned = cleaned.replace(/,/g, "");
+    } else {
+      // European: 1.677,69
+      cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+    }
+  } else if (cleaned.includes(",")) {
+    // Only comma: Swedish decimal "666,67" → "666.67"
+    cleaned = cleaned.replace(",", ".");
+  }
   const num = Number(cleaned);
   return isNaN(num) ? 0 : num;
 }
@@ -265,13 +280,34 @@ async function main() {
     return;
   }
 
-  // Insert
-  console.log(`\nInserting ${toInsert.length} budget entries...`);
-  const result = await prisma.budgetEntry.createMany({
-    data: toInsert,
-    skipDuplicates: true,
-  });
-  console.log(`Done! ${result.count} rows inserted.`);
+  // Upsert (insert new, update existing with corrected amounts)
+  console.log(`\nUpserting ${toInsert.length} budget entries...`);
+  let inserted = 0;
+  let updated = 0;
+  for (const row of toInsert) {
+    const existing = await prisma.budgetEntry.findFirst({
+      where: {
+        startYear: row.startYear,
+        startMonth: row.startMonth,
+        customerId: row.customerId,
+        articleId: row.articleId,
+        status: "PUBLISHED",
+      },
+    });
+    if (existing) {
+      if (Number(existing.hours) !== row.hours || Number(existing.amount) !== row.amount) {
+        await prisma.budgetEntry.update({
+          where: { id: existing.id },
+          data: { hours: row.hours, amount: row.amount, endYear: row.endYear, endMonth: row.endMonth },
+        });
+        updated++;
+      }
+    } else {
+      await prisma.budgetEntry.create({ data: row });
+      inserted++;
+    }
+  }
+  console.log(`Done! ${inserted} rows inserted, ${updated} rows updated.`);
 }
 
 main()
