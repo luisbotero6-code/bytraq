@@ -127,8 +127,12 @@ export function parseData(text: string, columns: ColumnDef[]): ParseResult {
   return { headers: [], rows };
 }
 
-/** Parse a number that may use comma as decimal separator (Swedish locale) */
+/** Parse a number that may use comma as decimal separator (Swedish locale).
+ *  Handles: "2 666,67", "- kr", "−", empty strings, etc. */
 export function parseNum(value: string): number {
   if (!value || !value.trim()) return 0;
-  return Number(value.replace(/\s/g, "").replace(",", "."));
+  const cleaned = value.replace(/\s/g, "").replace(/kr/gi, "").replace(/−/g, "-").replace(",", ".").trim();
+  if (!cleaned || cleaned === "-") return 0;
+  const num = Number(cleaned);
+  return isNaN(num) ? 0 : num;
 }
