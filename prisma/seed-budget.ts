@@ -22,6 +22,7 @@ import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as fs from "fs";
+import * as XLSX from "xlsx";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const prisma = new PrismaClient({ adapter });
@@ -37,15 +38,33 @@ function parseNum(s: string): number {
   return isNaN(num) ? 0 : num;
 }
 
-/** Parse a date like "2023-03-01" into { year, month } or null */
+/** Parse a date into { year, month }. Supports:
+ *  - "2023-03-01" (ISO)
+ *  - "3/1/23" or "3/1/2023" (US M/D/YY from Excel)
+ *  - "2023-03" (YYYY-MM)
+ */
 function parsePeriod(s: string): { year: number; month: number } | null {
   if (!s || !s.trim()) return null;
-  const match = s.trim().match(/^(\d{4})-(\d{1,2})/);
-  if (!match) return null;
-  const year = parseInt(match[1], 10);
-  const month = parseInt(match[2], 10);
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) return null;
-  return { year, month };
+  const v = s.trim();
+
+  // ISO: 2023-03-01 or 2023-03
+  const iso = v.match(/^(\d{4})-(\d{1,2})/);
+  if (iso) {
+    const year = parseInt(iso[1], 10);
+    const month = parseInt(iso[2], 10);
+    if (!isNaN(year) && month >= 1 && month <= 12) return { year, month };
+  }
+
+  // US format from Excel: M/D/YY or M/D/YYYY
+  const us = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (us) {
+    const month = parseInt(us[1], 10);
+    let year = parseInt(us[3], 10);
+    if (year < 100) year += 2000; // 23 → 2023
+    if (!isNaN(year) && month >= 1 && month <= 12) return { year, month };
+  }
+
+  return null;
 }
 
 // ---------- main ----------
@@ -66,8 +85,20 @@ async function main() {
     process.exit(1);
   }
 
-  const content = fs.readFileSync(filePath, "utf-8");
-  const lines = content.split("\n").filter((l) => l.trim());
+  // Read file — support both Excel (.xlsx/.xls) and TSV/CSV
+  const isExcel = filePath.endsWith(".xlsx") || filePath.endsWith(".xls");
+  let tsvContent: string;
+
+  if (isExcel) {
+    const buffer = fs.readFileSync(filePath);
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, cellText: true });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    tsvContent = XLSX.utils.sheet_to_csv(sheet, { FS: "\t", rawNumbers: false });
+  } else {
+    tsvContent = fs.readFileSync(filePath, "utf-8");
+  }
+
+  const lines = tsvContent.split("\n").filter((l) => l.trim());
 
   if (lines.length < 2) {
     console.error("File must have a header row and at least one data row");
@@ -144,9 +175,9 @@ async function main() {
   for (let i = 0; i < dataRows.length; i++) {
     const cells = dataRows[i].split("\t").map((c) => c.trim());
 
-    // Filter on "Rad att ladda"
-    const loadFlag = iLoad !== -1 ? cells[iLoad] ?? "" : "SANT";
-    if (!includeAll && loadFlag.toUpperCase() !== "SANT") {
+    // Filter on "Rad att ladda" (SANT/TRUE in Swedish/English)
+    const loadFlag = iLoad !== -1 ? (cells[iLoad] ?? "").toUpperCase().trim() : "SANT";
+    if (!includeAll && loadFlag !== "SANT" && loadFlag !== "TRUE") {
       filteredOut++;
       continue;
     }
