@@ -107,7 +107,7 @@ export default function BudgetPage() {
   return (
     <div>
       <PageHeader title="Budget" description="Hantera budgetar per kund och artikel">
-        <BudgetUploadDialog onImported={() => refetch()} />
+        <BudgetUploadDialog year={year} month={month} onImported={() => refetch()} />
         <PeriodSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
       </PageHeader>
 
