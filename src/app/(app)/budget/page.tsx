@@ -34,6 +34,8 @@ export default function BudgetPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [endDialogCustomer, setEndDialogCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [endYear, setEndYear] = useState(now.getFullYear());
+  const [endMonth, setEndMonth] = useState(now.getMonth() + 1);
   const [historyCustomer, setHistoryCustomer] = useState<{ id: string; name: string } | null>(null);
   const [deleteEntryId, setDeleteEntryId] = useState<string | null>(null);
   const [deleteCustomer, setDeleteCustomer] = useState<{ id: string; name: string; status?: "DRAFT" | "PUBLISHED" } | null>(null);
@@ -223,7 +225,7 @@ export default function BudgetPage() {
                 <Button variant="outline" size="sm" onClick={() => setHistoryCustomer({ id, name })}>
                   Historik
                 </Button>
-                <Button variant="destructive" size="sm" onClick={() => setEndDialogCustomer({ id, name })}>
+                <Button variant="destructive" size="sm" onClick={() => { setEndYear(year); setEndMonth(month); setEndDialogCustomer({ id, name }); }}>
                   Avsluta
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setDeleteCustomer({ id, name, status: "PUBLISHED" })}>
@@ -306,22 +308,26 @@ export default function BudgetPage() {
             <DialogTitle>Avsluta budget?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Alla pågående budgetposter för <strong>{endDialogCustomer?.name}</strong> avslutas per {formatPeriod(year, month)}.
+            Alla pågående budgetposter för <strong>{endDialogCustomer?.name}</strong> avslutas per vald period.
           </p>
+          <div>
+            <label className="text-sm font-medium mb-1 block">Giltig till och med</label>
+            <PeriodSelector year={endYear} month={endMonth} onChange={(y, m) => { setEndYear(y); setEndMonth(m); }} />
+          </div>
           <Button
             variant="destructive"
             onClick={() => {
               if (endDialogCustomer) {
                 endBudgetMutation.mutate({
                   customerId: endDialogCustomer.id,
-                  endYear: year,
-                  endMonth: month,
+                  endYear,
+                  endMonth,
                 });
               }
             }}
             disabled={endBudgetMutation.isPending}
           >
-            {endBudgetMutation.isPending ? "Avslutar..." : "Bekräfta avslut"}
+            {endBudgetMutation.isPending ? "Avslutar..." : `Avsluta per ${formatPeriod(endYear, endMonth)}`}
           </Button>
         </DialogContent>
       </Dialog>
