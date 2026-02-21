@@ -180,7 +180,7 @@ export default function BudgetPage() {
                     <td className="p-2 text-right">
                       <Input
                         type="number"
-                        className="w-20 h-7 text-right text-xs ml-auto"
+                        className="h-7 text-right text-xs w-full"
                         defaultValue={Number(entry.hours)}
                         onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
                       />
@@ -188,7 +188,7 @@ export default function BudgetPage() {
                     <td className="p-2 text-right">
                       <Input
                         type="number"
-                        className="w-24 h-7 text-right text-xs ml-auto"
+                        className="h-7 text-right text-xs w-full"
                         defaultValue={Number(entry.amount)}
                         onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
                       />
@@ -303,7 +303,7 @@ export default function BudgetPage() {
                           <td className="px-3 py-1.5 text-right">
                             <Input
                               type="number"
-                              className="w-20 h-7 text-right text-xs ml-auto"
+                              className="h-7 text-right text-xs w-full"
                               defaultValue={Number(entry.hours)}
                               onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
                             />
@@ -311,7 +311,7 @@ export default function BudgetPage() {
                           <td className="px-3 py-1.5 text-right">
                             <Input
                               type="number"
-                              className="w-24 h-7 text-right text-xs ml-auto"
+                              className="h-7 text-right text-xs w-full"
                               defaultValue={Number(entry.amount)}
                               onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
                             />
