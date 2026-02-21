@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Upload } from "lucide-react";
+import { PeriodSelector } from "@/components/shared/period-selector";
 
 const budgetColumns: ColumnDef[] = [
   { key: "artikelnr", label: "Artikelnummer", aliases: ["Artikelnr", "Article Code"] },
@@ -41,6 +42,8 @@ export function BudgetUploadDialog({ year, month, onImported }: BudgetUploadDial
   const [text, setText] = useState("");
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [importing, setImporting] = useState(false);
+  const [startYear, setStartYear] = useState(year);
+  const [startMonth, setStartMonth] = useState(month);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: customers } = trpc.customer.list.useQuery(undefined, { enabled: open });
@@ -97,8 +100,8 @@ export function BudgetUploadDialog({ year, month, onImported }: BudgetUploadDial
         }));
 
       const result = await importMutation.mutateAsync({
-        startYear: year,
-        startMonth: month,
+        startYear,
+        startMonth,
         customerId,
         rows: mapped,
       });
@@ -119,6 +122,8 @@ export function BudgetUploadDialog({ year, month, onImported }: BudgetUploadDial
       setText("");
       setRows([]);
       setCustomerId("");
+      setStartYear(year);
+      setStartMonth(month);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Kunde inte importera";
       toast.error(message);
@@ -144,19 +149,29 @@ export function BudgetUploadDialog({ year, month, onImported }: BudgetUploadDial
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Customer selector */}
-          <div>
-            <label className="text-sm font-medium mb-1 block">Kund</label>
-            <Select value={customerId} onValueChange={setCustomerId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Välj kund..." />
-              </SelectTrigger>
-              <SelectContent>
-                {customers?.map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Customer selector + period */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="text-sm font-medium mb-1 block">Kund</label>
+              <Select value={customerId} onValueChange={setCustomerId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Välj kund..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {customers?.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block">Startdatum</label>
+              <PeriodSelector
+                year={startYear}
+                month={startMonth}
+                onChange={(y, m) => { setStartYear(y); setStartMonth(m); }}
+              />
+            </div>
           </div>
 
           {/* File input */}
@@ -198,14 +213,21 @@ export function BudgetUploadDialog({ year, month, onImported }: BudgetUploadDial
               </div>
 
               <div className="rounded-md border overflow-auto max-h-[300px]">
-                <table className="w-full text-sm">
+                <table className="w-full table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-[5%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[48%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[15%]" />
+                  </colgroup>
                   <thead className="bg-muted/50 sticky top-0">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium text-muted-foreground w-8"></th>
-                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Artikelnr</th>
-                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Beskrivning</th>
-                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Fastpris</th>
-                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Timmar</th>
+                      <th className="px-2 py-2 text-left font-medium text-muted-foreground"></th>
+                      <th className="px-2 py-2 text-left font-medium text-muted-foreground">Artikelnr</th>
+                      <th className="px-2 py-2 text-left font-medium text-muted-foreground">Beskrivning</th>
+                      <th className="px-2 py-2 text-right font-medium text-muted-foreground">Fastpris</th>
+                      <th className="px-2 py-2 text-right font-medium text-muted-foreground">Timmar</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -214,28 +236,28 @@ export function BudgetUploadDialog({ year, month, onImported }: BudgetUploadDial
                       const matched = code ? articleCodeSet.has(code.toLowerCase()) : false;
                       return (
                         <tr key={i} className="border-t">
-                          <td className="px-3 py-1.5 text-center">
+                          <td className="px-2 py-1.5 text-center">
                             {code && (
                               <span className={matched ? "text-green-600" : "text-red-600"}>
                                 {matched ? "\u2713" : "\u2717"}
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-1.5">{row.artikelnr}</td>
-                          <td className="px-3 py-1.5">{row.beskrivning}</td>
-                          <td className="px-3 py-1.5 text-right">{row.fastpris}</td>
-                          <td className="px-3 py-1.5 text-right">{row.timmar}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap">{row.artikelnr}</td>
+                          <td className="px-2 py-1.5 truncate" title={row.beskrivning}>{row.beskrivning}</td>
+                          <td className="px-2 py-1.5 text-right whitespace-nowrap">{row.fastpris}</td>
+                          <td className="px-2 py-1.5 text-right whitespace-nowrap">{row.timmar}</td>
                         </tr>
                       );
                     })}
                     <tr className="border-t bg-muted/50 font-semibold">
-                      <td className="px-3 py-1.5" />
-                      <td className="px-3 py-1.5" />
-                      <td className="px-3 py-1.5 text-right">Summa</td>
-                      <td className="px-3 py-1.5 text-right">
+                      <td className="px-2 py-1.5" />
+                      <td className="px-2 py-1.5" />
+                      <td className="px-2 py-1.5 text-right">Summa</td>
+                      <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         {rows.reduce((sum, r) => sum + parseNum(r.fastpris ?? ""), 0).toLocaleString("sv-SE")}
                       </td>
-                      <td className="px-3 py-1.5 text-right">
+                      <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         {rows.reduce((sum, r) => sum + parseNum(r.timmar ?? ""), 0).toLocaleString("sv-SE")}
                       </td>
                     </tr>
