@@ -49,7 +49,7 @@ export function BudgetHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Budgethistorik &mdash; {customerName}</DialogTitle>
         </DialogHeader>
@@ -74,7 +74,13 @@ export function BudgetHistoryDialog({
                   <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
                     {periodLabel} &rarr; {endLabel ?? <Badge variant="default">Pågående</Badge>}
                   </h3>
-                  <table className="w-full border-collapse text-sm">
+                  <table className="w-full table-fixed border-collapse text-sm">
+                    <colgroup>
+                      <col className="w-[50%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[22%]" />
+                      <col className="w-[13%]" />
+                    </colgroup>
                     <thead>
                       <tr className="border-b">
                         <th className="p-2 text-left font-medium">Artikel</th>
@@ -86,9 +92,9 @@ export function BudgetHistoryDialog({
                     <tbody>
                       {group!.map((entry) => (
                         <tr key={entry.id} className="border-b">
-                          <td className="p-2">{entry.article.name}</td>
-                          <td className="p-2 text-right">{Number(entry.hours)}</td>
-                          <td className="p-2 text-right">{Number(entry.amount).toLocaleString("sv-SE")} kr</td>
+                          <td className="p-2 truncate">{entry.article.name}</td>
+                          <td className="p-2 text-right whitespace-nowrap">{Number(entry.hours)}</td>
+                          <td className="p-2 text-right whitespace-nowrap">{Number(entry.amount).toLocaleString("sv-SE")} kr</td>
                           <td className="p-2 text-center">
                             <Badge variant="outline">v{entry.version}</Badge>
                           </td>
