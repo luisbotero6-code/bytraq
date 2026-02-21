@@ -21,7 +21,7 @@ function formatVariance(value: number): string {
 }
 
 type ArticleFilter = "FIXED_PRICE" | "TILLAGG" | "ALL";
-type SortField = "name" | "hours" | "variance" | "tb" | "tg";
+type SortField = "name" | "hours" | "budgetHours" | "utilization" | "variance" | "budgetAmount" | "cost" | "tb" | "tg";
 type SortDir = "asc" | "desc";
 
 interface FixedPriceAnalysisProps {
@@ -149,10 +149,16 @@ export function FixedPriceAnalysis({ startYear, startMonth, endYear, endMonth }:
     // Sort customer groups
     groups.sort((a, b) => {
       let cmp = 0;
+      const utilA = a.budgetHours > 0 ? a.actualHours / a.budgetHours : 0;
+      const utilB = b.budgetHours > 0 ? b.actualHours / b.budgetHours : 0;
       switch (sortField) {
         case "name": cmp = a.customerName.localeCompare(b.customerName, "sv"); break;
         case "hours": cmp = a.actualHours - b.actualHours; break;
+        case "budgetHours": cmp = a.budgetHours - b.budgetHours; break;
+        case "utilization": cmp = utilA - utilB; break;
         case "variance": cmp = a.varianceHours - b.varianceHours; break;
+        case "budgetAmount": cmp = a.budgetAmount - b.budgetAmount; break;
+        case "cost": cmp = a.actualCost - b.actualCost; break;
         case "tb": cmp = a.tb - b.tb; break;
         case "tg": cmp = a.tgPercent - b.tgPercent; break;
       }
@@ -194,15 +200,17 @@ export function FixedPriceAnalysis({ startYear, startMonth, endYear, endMonth }:
     { value: "TILLAGG", label: "Tillägg" },
   ];
 
-  const SortHeader = ({ field, children, align = "right" }: { field: SortField; children: React.ReactNode; align?: "left" | "right" }) => (
+  const SortHeader = ({ field, children, align = "right" }: { field: SortField; children: React.ReactNode; align?: "left" | "right" | "center" }) => (
     <th
       className={cn(
         "p-2 font-medium cursor-pointer select-none hover:bg-muted/50 transition-colors",
-        align === "right" ? "text-right" : "text-left",
+        align === "right" && "text-right",
+        align === "left" && "text-left",
+        align === "center" && "text-center",
       )}
       onClick={() => handleSort(field)}
     >
-      <span className="inline-flex items-center gap-1">
+      <span className={cn("inline-flex items-center gap-1", align === "center" && "justify-center")}>
         {children}
         {sortField === field && (
           <span className="text-xs">{sortDir === "asc" ? "\u25B2" : "\u25BC"}</span>
@@ -285,11 +293,11 @@ export function FixedPriceAnalysis({ startYear, startMonth, endYear, endMonth }:
                   <th className="w-8 p-2" />
                   <SortHeader field="name" align="left">Kund</SortHeader>
                   <SortHeader field="hours">Timmar</SortHeader>
-                  <th className="p-2 text-right font-medium">Budget h</th>
-                  <th className="p-2 text-center font-medium">Utnyttjande</th>
+                  <SortHeader field="budgetHours">Budget h</SortHeader>
+                  <SortHeader field="utilization" align="center">Utnyttjande</SortHeader>
                   <SortHeader field="variance">Avvikelse h</SortHeader>
-                  <th className="p-2 text-right font-medium">Fastpris</th>
-                  <th className="p-2 text-right font-medium">Kostnad</th>
+                  <SortHeader field="budgetAmount">Fastpris</SortHeader>
+                  <SortHeader field="cost">Kostnad</SortHeader>
                   <SortHeader field="tb">TB</SortHeader>
                   <SortHeader field="tg">TG%</SortHeader>
                 </tr>
