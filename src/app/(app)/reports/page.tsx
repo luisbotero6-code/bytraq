@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { PageHeader } from "@/components/shared/page-header";
 import { PeriodSelector } from "@/components/shared/period-selector";
+import { PeriodRangeSelector } from "@/components/shared/period-range-selector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { FixedPriceAnalysis } from "@/modules/reports/components/fixed-price-analysis";
 
 function formatSEK(amount: number): string {
   return new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 0 }).format(amount);
@@ -223,18 +225,43 @@ export default function ReportsPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
+  const [activeTab, setActiveTab] = useState("customer");
+
+  // Period range state for Fastprisanalys
+  const [startYear, setStartYear] = useState(now.getFullYear());
+  const [startMonth, setStartMonth] = useState(1);
+  const [endYear, setEndYear] = useState(now.getFullYear());
+  const [endMonth, setEndMonth] = useState(now.getMonth() + 1);
+
+  const isFixedPriceTab = activeTab === "fixed-price";
 
   return (
     <div>
       <PageHeader title="Rapporter" description="KPI-rapporter och analyser">
-        <PeriodSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
+        {isFixedPriceTab ? (
+          <PeriodRangeSelector
+            startYear={startYear}
+            startMonth={startMonth}
+            endYear={endYear}
+            endMonth={endMonth}
+            onChange={(sy, sm, ey, em) => {
+              setStartYear(sy);
+              setStartMonth(sm);
+              setEndYear(ey);
+              setEndMonth(em);
+            }}
+          />
+        ) : (
+          <PeriodSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
+        )}
       </PageHeader>
 
-      <Tabs defaultValue="customer">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="customer">Kundrapport</TabsTrigger>
           <TabsTrigger value="portfolio">Portföljvy</TabsTrigger>
           <TabsTrigger value="employee">Medarbetare</TabsTrigger>
+          <TabsTrigger value="fixed-price">Fastprisanalys</TabsTrigger>
         </TabsList>
         <TabsContent value="customer" className="mt-4">
           <CustomerReport year={year} month={month} />
@@ -244,6 +271,14 @@ export default function ReportsPage() {
         </TabsContent>
         <TabsContent value="employee" className="mt-4">
           <EmployeeReport year={year} month={month} />
+        </TabsContent>
+        <TabsContent value="fixed-price" className="mt-4">
+          <FixedPriceAnalysis
+            startYear={startYear}
+            startMonth={startMonth}
+            endYear={endYear}
+            endMonth={endMonth}
+          />
         </TabsContent>
       </Tabs>
     </div>

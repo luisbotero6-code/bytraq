@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../index";
-import { budgetEffectiveAtWhere, deduplicateBudgetEntries } from "@/server/services/budget-query";
+import { budgetEffectiveAtWhere, deduplicateBudgetEntries, aggregateBudgetsForRange, monthsInRange } from "@/server/services/budget-query";
 
 export const kpiRouter = router({
   dashboard: protectedProcedure
@@ -235,6 +235,180 @@ export const kpiRouter = router({
         availableHours,
         utilization: availableHours > 0 ? debitableHours / availableHours : 0,
         targetUtilization: Number(employee.targetUtilization),
+      };
+    }),
+
+  fixedPriceAnalysis: protectedProcedure
+    .input(z.object({
+      customerIds: z.array(z.string()),
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
+      endYear: z.number(),
+      endMonth: z.number().min(1).max(12),
+      articleFilter: z.enum(["FIXED_PRICE", "TILLAGG", "ALL"]),
+    }))
+    .query(async ({ ctx, input }) => {
+      // 1. Resolve customer list
+      let customerIds = input.customerIds;
+      if (customerIds.length === 0) {
+        const customers = await ctx.db.customer.findMany({
+          where: { customerType: { in: ["FASTPRIS", "BLANDAD"] }, active: true },
+          select: { id: true },
+        });
+        customerIds = customers.map(c => c.id);
+      }
+
+      if (customerIds.length === 0) {
+        return { rows: [], totals: { actualHours: 0, budgetHours: 0, varianceHours: 0, budgetAmount: 0, hourlyEquivalent: 0, actualCost: 0, tb: 0, tgPercent: 0 }, customerCount: 0, monthCount: 0 };
+      }
+
+      const startDate = new Date(input.startYear, input.startMonth - 1, 1);
+      const endDate = new Date(input.endYear, input.endMonth, 0);
+      const months = monthsInRange(input.startYear, input.startMonth, input.endYear, input.endMonth);
+
+      // 2. Fetch time entries in range
+      const timeEntries = await ctx.db.timeEntry.findMany({
+        where: {
+          customerId: { in: customerIds },
+          date: { gte: startDate, lte: endDate },
+        },
+        include: {
+          article: { include: { articleGroup: true } },
+          employee: { select: { defaultPricePerHour: true } },
+          customer: { select: { id: true, name: true } },
+        },
+      });
+
+      // 3. Filter articles based on articleFilter
+      const filteredEntries = timeEntries.filter(e => {
+        if (input.articleFilter === "FIXED_PRICE") return e.article.includedInFixedPrice;
+        if (input.articleFilter === "TILLAGG") return e.article.articleGroup.type === "TILLAGG";
+        // ALL = both fixed price and tillägg
+        return e.article.includedInFixedPrice || e.article.articleGroup.type === "TILLAGG";
+      });
+
+      // 4. Fetch aggregated budgets
+      const budgetMap = await aggregateBudgetsForRange(
+        ctx.db,
+        input.startYear,
+        input.startMonth,
+        input.endYear,
+        input.endMonth,
+        { customerId: { in: customerIds } },
+      );
+
+      // 5. Build rows per customer+article
+      const rowMap = new Map<string, {
+        customerId: string;
+        customerName: string;
+        articleId: string;
+        articleName: string;
+        includedInFixedPrice: boolean;
+        articleGroupType: string;
+        actualHours: number;
+        actualCost: number;
+        hourlyEquivalent: number;
+        budgetHours: number;
+        budgetAmount: number;
+      }>();
+
+      for (const entry of filteredEntries) {
+        const key = `${entry.customerId}:${entry.articleId}`;
+        const existing = rowMap.get(key) ?? {
+          customerId: entry.customerId,
+          customerName: entry.customer.name,
+          articleId: entry.articleId,
+          articleName: entry.article.name,
+          includedInFixedPrice: entry.article.includedInFixedPrice,
+          articleGroupType: entry.article.articleGroup.type,
+          actualHours: 0,
+          actualCost: 0,
+          hourlyEquivalent: 0,
+          budgetHours: 0,
+          budgetAmount: 0,
+        };
+        existing.actualHours += Number(entry.hours);
+        existing.actualCost += Number(entry.costAmount ?? 0);
+        existing.hourlyEquivalent += Number(entry.employee.defaultPricePerHour) * Number(entry.hours);
+        rowMap.set(key, existing);
+      }
+
+      // Merge budget data into rows
+      for (const [key, budget] of budgetMap) {
+        // Check if this budget article passes the filter
+        const existing = rowMap.get(key);
+        if (existing) {
+          existing.budgetHours = budget.hours;
+          existing.budgetAmount = budget.amount;
+        } else {
+          // Budget exists but no time entries — need article info
+          const article = await ctx.db.article.findUnique({
+            where: { id: budget.articleId },
+            include: { articleGroup: true },
+          });
+          if (!article) continue;
+
+          // Apply filter
+          if (input.articleFilter === "FIXED_PRICE" && !article.includedInFixedPrice) continue;
+          if (input.articleFilter === "TILLAGG" && article.articleGroup.type !== "TILLAGG") continue;
+          if (input.articleFilter === "ALL" && !article.includedInFixedPrice && article.articleGroup.type !== "TILLAGG") continue;
+
+          // Only include if customer is in our list
+          if (!customerIds.includes(budget.customerId)) continue;
+
+          const customer = await ctx.db.customer.findUnique({
+            where: { id: budget.customerId },
+            select: { name: true },
+          });
+
+          rowMap.set(key, {
+            customerId: budget.customerId,
+            customerName: customer?.name ?? "",
+            articleId: budget.articleId,
+            articleName: article.name,
+            includedInFixedPrice: article.includedInFixedPrice,
+            articleGroupType: article.articleGroup.type,
+            actualHours: 0,
+            actualCost: 0,
+            hourlyEquivalent: 0,
+            budgetHours: budget.hours,
+            budgetAmount: budget.amount,
+          });
+        }
+      }
+
+      // 6. Build final rows with calculated fields
+      const rows = Array.from(rowMap.values()).map(r => {
+        const varianceHours = r.actualHours - r.budgetHours;
+        const tb = r.budgetAmount - r.actualCost;
+        const tgPercent = r.budgetAmount > 0 ? tb / r.budgetAmount : 0;
+        return {
+          ...r,
+          varianceHours,
+          tb,
+          tgPercent,
+        };
+      }).sort((a, b) => a.customerName.localeCompare(b.customerName, "sv") || a.articleName.localeCompare(b.articleName, "sv"));
+
+      // 7. Calculate totals
+      const totals = rows.reduce((acc, r) => ({
+        actualHours: acc.actualHours + r.actualHours,
+        budgetHours: acc.budgetHours + r.budgetHours,
+        varianceHours: acc.varianceHours + r.varianceHours,
+        budgetAmount: acc.budgetAmount + r.budgetAmount,
+        hourlyEquivalent: acc.hourlyEquivalent + r.hourlyEquivalent,
+        actualCost: acc.actualCost + r.actualCost,
+        tb: acc.tb + r.tb,
+        tgPercent: 0, // calculated below
+      }), { actualHours: 0, budgetHours: 0, varianceHours: 0, budgetAmount: 0, hourlyEquivalent: 0, actualCost: 0, tb: 0, tgPercent: 0 });
+
+      totals.tgPercent = totals.budgetAmount > 0 ? totals.tb / totals.budgetAmount : 0;
+
+      return {
+        rows,
+        totals,
+        customerCount: new Set(rows.map(r => r.customerId)).size,
+        monthCount: months.length,
       };
     }),
 });
