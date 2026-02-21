@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { PageHeader } from "@/components/shared/page-header";
-import { PeriodSelector } from "@/components/shared/period-selector";
 import { PeriodRangeSelector } from "@/components/shared/period-range-selector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -52,13 +51,20 @@ function SortHeader({ active, dir, onClick, children, align = "right" }: {
   );
 }
 
-function CustomerReport({ year, month }: { year: number; month: number }) {
+interface PeriodRangeProps {
+  startYear: number;
+  startMonth: number;
+  endYear: number;
+  endMonth: number;
+}
+
+function CustomerReport({ startYear, startMonth, endYear, endMonth }: PeriodRangeProps) {
   const [customerId, setCustomerId] = useState("");
   const [sortField, setSortField] = useState<CustomerSortField>("article");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const { data: customers } = trpc.customer.list.useQuery();
   const { data: report } = trpc.kpi.customerReport.useQuery(
-    { customerId, year, month },
+    { customerId, startYear, startMonth, endYear, endMonth },
     { enabled: !!customerId }
   );
 
@@ -169,13 +175,13 @@ type PortfolioSortField = "name" | "hours" | "budgetHours" | "revenue" | "tg" | 
 
 const statusOrder = { green: 0, yellow: 1, red: 2 };
 
-function PortfolioView({ year, month }: { year: number; month: number }) {
+function PortfolioView({ startYear, startMonth, endYear, endMonth }: PeriodRangeProps) {
   const [managerId, setManagerId] = useState("");
   const [sortField, setSortField] = useState<PortfolioSortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const { data: employees } = trpc.employee.list.useQuery();
   const { data: portfolio } = trpc.kpi.portfolio.useQuery(
-    { clientManagerId: managerId, year, month },
+    { clientManagerId: managerId, startYear, startMonth, endYear, endMonth },
     { enabled: !!managerId }
   );
 
@@ -265,11 +271,11 @@ function PortfolioView({ year, month }: { year: number; month: number }) {
   );
 }
 
-function EmployeeReport({ year, month }: { year: number; month: number }) {
+function EmployeeReport({ startYear, startMonth, endYear, endMonth }: PeriodRangeProps) {
   const [employeeId, setEmployeeId] = useState("");
   const { data: employees } = trpc.employee.list.useQuery();
   const { data: report } = trpc.kpi.employeeReport.useQuery(
-    { employeeId, year, month },
+    { employeeId, startYear, startMonth, endYear, endMonth },
     { enabled: !!employeeId }
   );
 
@@ -321,37 +327,30 @@ function EmployeeReport({ year, month }: { year: number; month: number }) {
 
 export default function ReportsPage() {
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
   const [activeTab, setActiveTab] = useState("customer");
 
-  // Period range state for Fastprisanalys
   const [startYear, setStartYear] = useState(now.getFullYear());
   const [startMonth, setStartMonth] = useState(1);
   const [endYear, setEndYear] = useState(now.getFullYear());
   const [endMonth, setEndMonth] = useState(now.getMonth() + 1);
 
-  const isFixedPriceTab = activeTab === "fixed-price";
+  const periodProps = { startYear, startMonth, endYear, endMonth };
 
   return (
     <div>
       <PageHeader title="Rapporter" description="KPI-rapporter och analyser">
-        {isFixedPriceTab ? (
-          <PeriodRangeSelector
-            startYear={startYear}
-            startMonth={startMonth}
-            endYear={endYear}
-            endMonth={endMonth}
-            onChange={(sy, sm, ey, em) => {
-              setStartYear(sy);
-              setStartMonth(sm);
-              setEndYear(ey);
-              setEndMonth(em);
-            }}
-          />
-        ) : (
-          <PeriodSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
-        )}
+        <PeriodRangeSelector
+          startYear={startYear}
+          startMonth={startMonth}
+          endYear={endYear}
+          endMonth={endMonth}
+          onChange={(sy, sm, ey, em) => {
+            setStartYear(sy);
+            setStartMonth(sm);
+            setEndYear(ey);
+            setEndMonth(em);
+          }}
+        />
       </PageHeader>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -362,21 +361,16 @@ export default function ReportsPage() {
           <TabsTrigger value="fixed-price">Fastprisanalys</TabsTrigger>
         </TabsList>
         <TabsContent value="customer" className="mt-4">
-          <CustomerReport year={year} month={month} />
+          <CustomerReport {...periodProps} />
         </TabsContent>
         <TabsContent value="portfolio" className="mt-4">
-          <PortfolioView year={year} month={month} />
+          <PortfolioView {...periodProps} />
         </TabsContent>
         <TabsContent value="employee" className="mt-4">
-          <EmployeeReport year={year} month={month} />
+          <EmployeeReport {...periodProps} />
         </TabsContent>
         <TabsContent value="fixed-price" className="mt-4">
-          <FixedPriceAnalysis
-            startYear={startYear}
-            startMonth={startMonth}
-            endYear={endYear}
-            endMonth={endMonth}
-          />
+          <FixedPriceAnalysis {...periodProps} />
         </TabsContent>
       </Tabs>
     </div>

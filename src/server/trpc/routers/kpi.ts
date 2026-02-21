@@ -83,22 +83,27 @@ export const kpiRouter = router({
   customerReport: protectedProcedure
     .input(z.object({
       customerId: z.string(),
-      year: z.number(),
-      month: z.number().min(1).max(12),
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
+      endYear: z.number(),
+      endMonth: z.number().min(1).max(12),
     }))
     .query(async ({ ctx, input }) => {
-      const startDate = new Date(input.year, input.month - 1, 1);
-      const endDate = new Date(input.year, input.month, 0);
+      const startDate = new Date(input.startYear, input.startMonth - 1, 1);
+      const endDate = new Date(input.endYear, input.endMonth, 0);
 
-      const [timeEntries, budgetEntries, customer] = await Promise.all([
+      const budgetMap = await aggregateBudgetsForRange(
+        ctx.db,
+        input.startYear, input.startMonth,
+        input.endYear, input.endMonth,
+        { customerId: input.customerId },
+      );
+
+      const [timeEntries, customer] = await Promise.all([
         ctx.db.timeEntry.findMany({
           where: { customerId: input.customerId, date: { gte: startDate, lte: endDate } },
           include: { article: { include: { articleGroup: true } }, employee: true },
         }),
-        ctx.db.budgetEntry.findMany({
-          where: budgetEffectiveAtWhere(input.year, input.month, { customerId: input.customerId }),
-          include: { article: true },
-        }).then(deduplicateBudgetEntries),
         ctx.db.customer.findUniqueOrThrow({
           where: { id: input.customerId },
           include: { manager: true },
@@ -120,13 +125,21 @@ export const kpiRouter = router({
         articleMap.set(entry.articleId, existing);
       }
 
-      for (const b of budgetEntries) {
-        const existing = articleMap.get(b.articleId) ?? {
-          articleName: b.article.name, hours: 0, revenue: 0, cost: 0, budgetHours: 0, budgetAmount: 0,
-        };
-        existing.budgetHours += Number(b.hours);
-        existing.budgetAmount += Number(b.amount);
-        articleMap.set(b.articleId, existing);
+      // Merge aggregated budget data
+      for (const [key, budget] of budgetMap) {
+        if (budget.customerId !== input.customerId) continue;
+        const existing = articleMap.get(budget.articleId);
+        if (existing) {
+          existing.budgetHours += budget.hours;
+          existing.budgetAmount += budget.amount;
+        } else {
+          const article = await ctx.db.article.findUnique({ where: { id: budget.articleId } });
+          if (!article) continue;
+          articleMap.set(budget.articleId, {
+            articleName: article.name, hours: 0, revenue: 0, cost: 0,
+            budgetHours: budget.hours, budgetAmount: budget.amount,
+          });
+        }
       }
 
       const totalRevenue = timeEntries.reduce((s, e) => s + Number(e.calculatedPrice ?? 0), 0);
@@ -150,12 +163,14 @@ export const kpiRouter = router({
   portfolio: protectedProcedure
     .input(z.object({
       clientManagerId: z.string(),
-      year: z.number(),
-      month: z.number().min(1).max(12),
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
+      endYear: z.number(),
+      endMonth: z.number().min(1).max(12),
     }))
     .query(async ({ ctx, input }) => {
-      const startDate = new Date(input.year, input.month - 1, 1);
-      const endDate = new Date(input.year, input.month, 0);
+      const startDate = new Date(input.startYear, input.startMonth - 1, 1);
+      const endDate = new Date(input.endYear, input.endMonth, 0);
 
       const customers = await ctx.db.customer.findMany({
         where: { clientManagerId: input.clientManagerId, active: true },
@@ -163,22 +178,30 @@ export const kpiRouter = router({
 
       const customerIds = customers.map(c => c.id);
 
-      const [timeEntries, budgetEntries] = await Promise.all([
+      const [timeEntries, budgetMap] = await Promise.all([
         ctx.db.timeEntry.findMany({
           where: { customerId: { in: customerIds }, date: { gte: startDate, lte: endDate } },
         }),
-        ctx.db.budgetEntry.findMany({
-          where: budgetEffectiveAtWhere(input.year, input.month, { customerId: { in: customerIds } }),
-        }).then(deduplicateBudgetEntries),
+        aggregateBudgetsForRange(
+          ctx.db,
+          input.startYear, input.startMonth,
+          input.endYear, input.endMonth,
+          { customerId: { in: customerIds } },
+        ),
       ]);
 
       return customers.map(c => {
         const cTime = timeEntries.filter(t => t.customerId === c.id);
-        const cBudget = budgetEntries.filter(b => b.customerId === c.id);
         const revenue = cTime.reduce((s, e) => s + Number(e.calculatedPrice ?? 0), 0);
         const cost = cTime.reduce((s, e) => s + Number(e.costAmount ?? 0), 0);
         const hours = cTime.reduce((s, e) => s + Number(e.hours), 0);
-        const budgetHours = cBudget.reduce((s, e) => s + Number(e.hours), 0);
+
+        // Sum budget hours from aggregated budget map
+        let budgetHours = 0;
+        for (const [, b] of budgetMap) {
+          if (b.customerId === c.id) budgetHours += b.hours;
+        }
+
         const tb = revenue - cost;
         const tgPercent = revenue > 0 ? tb / revenue : 0;
         const budgetDeviation = budgetHours > 0 ? (hours - budgetHours) / budgetHours : 0;
@@ -194,12 +217,14 @@ export const kpiRouter = router({
   employeeReport: protectedProcedure
     .input(z.object({
       employeeId: z.string(),
-      year: z.number(),
-      month: z.number().min(1).max(12),
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
+      endYear: z.number(),
+      endMonth: z.number().min(1).max(12),
     }))
     .query(async ({ ctx, input }) => {
-      const startDate = new Date(input.year, input.month - 1, 1);
-      const endDate = new Date(input.year, input.month, 0);
+      const startDate = new Date(input.startYear, input.startMonth - 1, 1);
+      const endDate = new Date(input.endYear, input.endMonth, 0);
 
       const [employee, timeEntries, absences, calendarDays] = await Promise.all([
         ctx.db.employee.findUniqueOrThrow({ where: { id: input.employeeId } }),
