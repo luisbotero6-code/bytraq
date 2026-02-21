@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { Trash2, Search } from "lucide-react";
 import { BudgetUploadDialog } from "@/modules/budget/components/budget-upload-dialog";
 import { BudgetHistoryDialog } from "@/modules/budget/components/budget-history-dialog";
+import { BudgetCell } from "@/modules/budget/components/budget-cell";
 
 const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "Maj", "Jun",
@@ -93,17 +94,17 @@ export default function BudgetPage() {
     }
   }
 
-  function handleFieldChange(entryId: string, field: "hours" | "amount", value: string, currentHours: number, currentAmount: number) {
-    const num = parseFloat(value);
-    if (isNaN(num)) return;
+  function handleFieldSave(entryId: string, field: "hours" | "amount", newValue: number, currentHours: number, currentAmount: number) {
     upsertMutation.mutate({
       id: entryId,
       startYear: year,
       startMonth: month,
       customerId: "",
       articleId: "",
-      hours: field === "hours" ? num : currentHours,
-      amount: field === "amount" ? num : currentAmount,
+      hours: field === "hours" ? newValue : currentHours,
+      amount: field === "amount" ? newValue : currentAmount,
+    }, {
+      onSuccess: () => refetch(),
     });
   }
 
@@ -184,20 +185,18 @@ export default function BudgetPage() {
                         )}
                       </span>
                     </td>
-                    <td className="p-2 text-right">
-                      <Input
-                        type="number"
-                        className="h-7 text-right text-xs w-full"
-                        defaultValue={Number(entry.hours)}
-                        onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
+                    <td className="p-2">
+                      <BudgetCell
+                        value={Number(entry.hours)}
+                        step={0.5}
+                        onSave={(v) => handleFieldSave(entry.id, "hours", v, Number(entry.hours), Number(entry.amount))}
                       />
                     </td>
-                    <td className="p-2 text-right">
-                      <Input
-                        type="number"
-                        className="h-7 text-right text-xs w-full"
-                        defaultValue={Number(entry.amount)}
-                        onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
+                    <td className="p-2">
+                      <BudgetCell
+                        value={Number(entry.amount)}
+                        step={100}
+                        onSave={(v) => handleFieldSave(entry.id, "amount", v, Number(entry.hours), Number(entry.amount))}
                       />
                     </td>
                     <td className="p-2 text-center">
@@ -314,20 +313,18 @@ export default function BudgetPage() {
                               : <Badge variant="default" className="text-xs">Pågående</Badge>
                             }
                           </td>
-                          <td className="px-3 py-1.5 text-right">
-                            <Input
-                              type="number"
-                              className="h-7 text-right text-xs w-full"
-                              defaultValue={Number(entry.hours)}
-                              onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
+                          <td className="px-3 py-1.5">
+                            <BudgetCell
+                              value={Number(entry.hours)}
+                              step={0.5}
+                              onSave={(v) => handleFieldSave(entry.id, "hours", v, Number(entry.hours), Number(entry.amount))}
                             />
                           </td>
-                          <td className="px-3 py-1.5 text-right">
-                            <Input
-                              type="number"
-                              className="h-7 text-right text-xs w-full"
-                              defaultValue={Number(entry.amount)}
-                              onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
+                          <td className="px-3 py-1.5">
+                            <BudgetCell
+                              value={Number(entry.amount)}
+                              step={100}
+                              onSave={(v) => handleFieldSave(entry.id, "amount", v, Number(entry.hours), Number(entry.amount))}
                             />
                           </td>
                           <td className="px-3 py-1.5 text-center">
