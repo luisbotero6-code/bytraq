@@ -268,7 +268,16 @@ export default function BudgetPage() {
                   </div>
 
                   {/* Article rows */}
-                  <table className="w-full border-collapse text-sm">
+                  <table className="w-full table-fixed border-collapse text-sm">
+                    <colgroup>
+                      <col className="w-[30%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[8%]" />
+                    </colgroup>
                     <thead>
                       <tr className="border-b text-muted-foreground">
                         <th className="px-3 py-1.5 text-left font-medium text-xs">Artikel</th>
@@ -277,13 +286,13 @@ export default function BudgetPage() {
                         <th className="px-3 py-1.5 text-right font-medium text-xs">Timmar</th>
                         <th className="px-3 py-1.5 text-right font-medium text-xs">Belopp</th>
                         <th className="px-3 py-1.5 text-center font-medium text-xs">Ver</th>
-                        <th className="px-3 py-1.5 w-8"></th>
+                        <th className="px-3 py-1.5"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {group.entries.map((entry) => (
                         <tr key={entry.id} className="border-t">
-                          <td className="px-3 py-1.5">{entry.article.name}</td>
+                          <td className="px-3 py-1.5 truncate">{entry.article.name}</td>
                           <td className="px-3 py-1.5">{formatPeriod(entry.startYear, entry.startMonth)}</td>
                           <td className="px-3 py-1.5">
                             {entry.endYear != null && entry.endMonth != null
@@ -320,6 +329,20 @@ export default function BudgetPage() {
                           </td>
                         </tr>
                       ))}
+                      {/* Summary row */}
+                      <tr className="border-t bg-muted/30 font-semibold">
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground">Summa</td>
+                        <td className="px-3 py-1.5" />
+                        <td className="px-3 py-1.5" />
+                        <td className="px-3 py-1.5 text-right text-xs">
+                          {group.entries.reduce((s, e) => s + Number(e.hours), 0).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-xs">
+                          {group.entries.reduce((s, e) => s + Number(e.amount), 0).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr
+                        </td>
+                        <td className="px-3 py-1.5" />
+                        <td className="px-3 py-1.5" />
+                      </tr>
                     </tbody>
                   </table>
                 </div>
