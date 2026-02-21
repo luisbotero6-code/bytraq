@@ -176,7 +176,14 @@ export default function BudgetPage() {
                 {drafts.map((entry) => (
                   <tr key={entry.id} className="border-b">
                     <td className="p-2">{entry.customer.name}</td>
-                    <td className="p-2">{entry.article.name}</td>
+                    <td className="p-2">
+                      <span className="flex items-center gap-1.5">
+                        {entry.article.name}
+                        {entry.article.includedInFixedPrice && (
+                          <Badge variant="secondary" className="text-[10px] px-1 py-0 shrink-0">FP</Badge>
+                        )}
+                      </span>
+                    </td>
                     <td className="p-2 text-right">
                       <Input
                         type="number"
@@ -292,7 +299,14 @@ export default function BudgetPage() {
                     <tbody>
                       {group.entries.map((entry) => (
                         <tr key={entry.id} className="border-t">
-                          <td className="px-3 py-1.5 truncate">{entry.article.name}</td>
+                          <td className="px-3 py-1.5 truncate">
+                            <span className="flex items-center gap-1.5">
+                              {entry.article.name}
+                              {entry.article.includedInFixedPrice && (
+                                <Badge variant="secondary" className="text-[10px] px-1 py-0 shrink-0">FP</Badge>
+                              )}
+                            </span>
+                          </td>
                           <td className="px-3 py-1.5">{formatPeriod(entry.startYear, entry.startMonth)}</td>
                           <td className="px-3 py-1.5">
                             {entry.endYear != null && entry.endMonth != null

@@ -156,14 +156,15 @@ model ArticleGroup {
 }
 
 model Article {
-  id             String   @id @default(cuid())
-  code           String   @unique
-  name           String
-  defaultPrice   Decimal?
-  articleGroupId String
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  code                 String   @unique
+  name                 String
+  defaultPrice         Decimal?
+  articleGroupId       String
+  includedInFixedPrice Boolean  @default(false)
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   articleGroup  ArticleGroup  @relation(fields: [articleGroupId], references: [id])
   timeEntries   TimeEntry[]

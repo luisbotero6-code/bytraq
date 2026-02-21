@@ -23,6 +23,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ARTICLE_GROUP_TYPE_LABELS } from "@/lib/constants";
 
@@ -43,6 +44,7 @@ export default function ArticlesAdminPage() {
     code: string;
     name: string;
     articleGroupId: string;
+    includedInFixedPrice: boolean;
     active: boolean;
   } | null>(null);
 
@@ -56,6 +58,11 @@ export default function ArticlesAdminPage() {
 
   const updateMutation = trpc.article.update.useMutation({
     onSuccess: () => { refetchArticles(); setEditDialogOpen(false); toast.success("Artikel uppdaterad"); },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const toggleFixedPriceMutation = trpc.article.update.useMutation({
+    onSuccess: () => { refetchArticles(); },
     onError: (err) => toast.error(err.message),
   });
 
@@ -75,6 +82,7 @@ export default function ArticlesAdminPage() {
       code: art.code,
       name: art.name,
       articleGroupId: art.articleGroupId,
+      includedInFixedPrice: art.includedInFixedPrice,
       active: art.active,
     });
     setEditDialogOpen(true);
@@ -88,6 +96,21 @@ export default function ArticlesAdminPage() {
       header: "Grupp",
       cell: ({ row }) => (
         <Badge variant="outline">{row.original.articleGroup.name}</Badge>
+      ),
+    },
+    {
+      accessorKey: "includedInFixedPrice",
+      header: "Fastpris",
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.original.includedInFixedPrice}
+          onCheckedChange={(checked) => {
+            toggleFixedPriceMutation.mutate({
+              id: row.original.id,
+              includedInFixedPrice: !!checked,
+            });
+          }}
+        />
       ),
     },
     {
@@ -206,6 +229,13 @@ export default function ArticlesAdminPage() {
                 </Select>
               </div>
               <div className="flex items-center gap-2">
+                <Label>Ingår i fastpris</Label>
+                <Checkbox
+                  checked={editData.includedInFixedPrice}
+                  onCheckedChange={(checked) => setEditData({ ...editData, includedInFixedPrice: !!checked })}
+                />
+              </div>
+              <div className="flex items-center gap-2">
                 <Label>Aktiv</Label>
                 <input
                   type="checkbox"
@@ -220,6 +250,7 @@ export default function ArticlesAdminPage() {
                   code: editData.code,
                   name: editData.name,
                   articleGroupId: editData.articleGroupId,
+                  includedInFixedPrice: editData.includedInFixedPrice,
                   active: editData.active,
                 })}
                 disabled={!editData.code || !editData.name || updateMutation.isPending}

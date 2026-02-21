@@ -50,6 +50,7 @@ export const articleRouter = router({
       code: z.string().min(1).optional(),
       name: z.string().min(1).optional(),
       articleGroupId: z.string().optional(),
+      includedInFixedPrice: z.boolean().optional(),
       active: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
