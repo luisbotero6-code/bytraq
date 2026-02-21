@@ -15,7 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
+import { Trash2, Search } from "lucide-react";
 import { BudgetUploadDialog } from "@/modules/budget/components/budget-upload-dialog";
 import { BudgetHistoryDialog } from "@/modules/budget/components/budget-history-dialog";
 
@@ -39,6 +39,7 @@ export default function BudgetPage() {
   const [historyCustomer, setHistoryCustomer] = useState<{ id: string; name: string } | null>(null);
   const [deleteEntryId, setDeleteEntryId] = useState<string | null>(null);
   const [deleteCustomer, setDeleteCustomer] = useState<{ id: string; name: string; status?: "DRAFT" | "PUBLISHED" } | null>(null);
+  const [search, setSearch] = useState("");
 
   const { data: entries, refetch } = trpc.budget.list.useQuery({ year, month });
   const publishMutation = trpc.budget.publish.useMutation({
@@ -211,89 +212,122 @@ export default function BudgetPage() {
         </div>
       )}
 
-      {published.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
-            Publicerad <Badge>{published.length}</Badge>
-          </h2>
+      {published.length > 0 && (() => {
+        const q = search.toLowerCase();
+        const filtered = q ? published.filter((e) => e.customer.name.toLowerCase().includes(q)) : published;
 
-          {/* Per-customer action buttons */}
-          <div className="flex flex-wrap gap-2 mb-3">
-            {Array.from(publishedCustomers.entries()).map(([id, name]) => (
-              <div key={id} className="flex items-center gap-1">
-                <span className="text-sm font-medium">{name}:</span>
-                <Button variant="outline" size="sm" onClick={() => setHistoryCustomer({ id, name })}>
-                  Historik
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => { setEndYear(year); setEndMonth(month); setEndDialogCustomer({ id, name }); }}>
-                  Avsluta
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setDeleteCustomer({ id, name, status: "PUBLISHED" })}>
-                  <Trash2 className="h-3.5 w-3.5 mr-1" />
-                  Ta bort
-                </Button>
+        // Group by customer preserving order
+        const groups: Array<{ id: string; name: string; entries: typeof filtered }> = [];
+        const seen = new Set<string>();
+        for (const entry of filtered) {
+          if (!seen.has(entry.customerId)) {
+            seen.add(entry.customerId);
+            groups.push({ id: entry.customerId, name: entry.customer.name, entries: [] });
+          }
+          groups.find((g) => g.id === entry.customerId)!.entries.push(entry);
+        }
+
+        return (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                Publicerad <Badge>{published.length}</Badge>
+              </h2>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Sök kund..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8 h-8 w-64 text-sm"
+                />
               </div>
-            ))}
-          </div>
+            </div>
 
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b">
-                <th className="p-2 text-left font-medium">Kund</th>
-                <th className="p-2 text-left font-medium">Artikel</th>
-                <th className="p-2 text-left font-medium">Giltig från</th>
-                <th className="p-2 text-left font-medium">Giltig till</th>
-                <th className="p-2 text-right font-medium">Timmar</th>
-                <th className="p-2 text-right font-medium">Belopp</th>
-                <th className="p-2 text-center font-medium">Version</th>
-                <th className="p-2 w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {published.map((entry) => (
-                <tr key={entry.id} className="border-b">
-                  <td className="p-2">{entry.customer.name}</td>
-                  <td className="p-2">{entry.article.name}</td>
-                  <td className="p-2">{formatPeriod(entry.startYear, entry.startMonth)}</td>
-                  <td className="p-2">
-                    {entry.endYear != null && entry.endMonth != null
-                      ? formatPeriod(entry.endYear, entry.endMonth)
-                      : <Badge variant="default">Pågående</Badge>
-                    }
-                  </td>
-                  <td className="p-2 text-right">
-                    <Input
-                      type="number"
-                      className="w-20 h-7 text-right text-xs ml-auto"
-                      defaultValue={Number(entry.hours)}
-                      onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
-                    />
-                  </td>
-                  <td className="p-2 text-right">
-                    <Input
-                      type="number"
-                      className="w-24 h-7 text-right text-xs ml-auto"
-                      defaultValue={Number(entry.amount)}
-                      onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
-                    />
-                  </td>
-                  <td className="p-2 text-center">
-                    <Badge variant="secondary">v{entry.version}</Badge>
-                  </td>
-                  <td className="p-2 text-center">
-                    <button
-                      className="text-muted-foreground hover:text-destructive transition-colors"
-                      onClick={() => setDeleteEntryId(entry.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
+            {groups.length === 0 && search && (
+              <p className="text-sm text-muted-foreground py-4">Inga kunder matchar &quot;{search}&quot;</p>
+            )}
+
+            <div className="space-y-1">
+              {groups.map((group) => (
+                <div key={group.id} className="rounded-lg border">
+                  {/* Customer header */}
+                  <div className="flex items-center justify-between px-3 py-2 bg-muted/50">
+                    <span className="text-sm font-semibold">{group.name}</span>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setHistoryCustomer({ id: group.id, name: group.name })}>
+                        Historik
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => { setEndYear(year); setEndMonth(month); setEndDialogCustomer({ id: group.id, name: group.name }); }}>
+                        Avsluta
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => setDeleteCustomer({ id: group.id, name: group.name, status: "PUBLISHED" })}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Article rows */}
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="px-3 py-1.5 text-left font-medium text-xs">Artikel</th>
+                        <th className="px-3 py-1.5 text-left font-medium text-xs">Giltig från</th>
+                        <th className="px-3 py-1.5 text-left font-medium text-xs">Giltig till</th>
+                        <th className="px-3 py-1.5 text-right font-medium text-xs">Timmar</th>
+                        <th className="px-3 py-1.5 text-right font-medium text-xs">Belopp</th>
+                        <th className="px-3 py-1.5 text-center font-medium text-xs">Ver</th>
+                        <th className="px-3 py-1.5 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.entries.map((entry) => (
+                        <tr key={entry.id} className="border-t">
+                          <td className="px-3 py-1.5">{entry.article.name}</td>
+                          <td className="px-3 py-1.5">{formatPeriod(entry.startYear, entry.startMonth)}</td>
+                          <td className="px-3 py-1.5">
+                            {entry.endYear != null && entry.endMonth != null
+                              ? formatPeriod(entry.endYear, entry.endMonth)
+                              : <Badge variant="default" className="text-xs">Pågående</Badge>
+                            }
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <Input
+                              type="number"
+                              className="w-20 h-7 text-right text-xs ml-auto"
+                              defaultValue={Number(entry.hours)}
+                              onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <Input
+                              type="number"
+                              className="w-24 h-7 text-right text-xs ml-auto"
+                              defaultValue={Number(entry.amount)}
+                              onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-center">
+                            <Badge variant="secondary" className="text-xs">v{entry.version}</Badge>
+                          </td>
+                          <td className="px-3 py-1.5 text-center">
+                            <button
+                              className="text-muted-foreground hover:text-destructive transition-colors"
+                              onClick={() => setDeleteEntryId(entry.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </div>
+          </div>
+        );
+      })()}
 
       {(!entries || entries.length === 0) && (
         <p className="text-sm text-muted-foreground text-center py-8">
