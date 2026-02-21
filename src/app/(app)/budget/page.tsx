@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { Trash2 } from "lucide-react";
 import { BudgetUploadDialog } from "@/modules/budget/components/budget-upload-dialog";
 import { BudgetHistoryDialog } from "@/modules/budget/components/budget-history-dialog";
 
@@ -34,6 +35,8 @@ export default function BudgetPage() {
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [endDialogCustomer, setEndDialogCustomer] = useState<{ id: string; name: string } | null>(null);
   const [historyCustomer, setHistoryCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [deleteEntryId, setDeleteEntryId] = useState<string | null>(null);
+  const [deleteCustomer, setDeleteCustomer] = useState<{ id: string; name: string; status?: "DRAFT" | "PUBLISHED" } | null>(null);
 
   const { data: entries, refetch } = trpc.budget.list.useQuery({ year, month });
   const publishMutation = trpc.budget.publish.useMutation({
@@ -58,6 +61,24 @@ export default function BudgetPage() {
     onError: (err) => toast.error(err.message),
   });
 
+  const deleteMutation = trpc.budget.delete.useMutation({
+    onSuccess: () => {
+      refetch();
+      setDeleteEntryId(null);
+      toast.success("Budgetpost borttagen");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const deleteByCustomerMutation = trpc.budget.deleteByCustomer.useMutation({
+    onSuccess: (result) => {
+      refetch();
+      setDeleteCustomer(null);
+      toast.success(`${result.deleted} budgetposter borttagna`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const drafts = entries?.filter((e) => e.status === "DRAFT") ?? [];
   const published = entries?.filter((e) => e.status === "PUBLISHED") ?? [];
 
@@ -69,10 +90,18 @@ export default function BudgetPage() {
     }
   }
 
-  function handleHoursChange(entryId: string, hours: string) {
-    const numHours = parseFloat(hours);
-    if (isNaN(numHours)) return;
-    upsertMutation.mutate({ id: entryId, startYear: year, startMonth: month, customerId: "", articleId: "", hours: numHours });
+  function handleFieldChange(entryId: string, field: "hours" | "amount", value: string, currentHours: number, currentAmount: number) {
+    const num = parseFloat(value);
+    if (isNaN(num)) return;
+    upsertMutation.mutate({
+      id: entryId,
+      startYear: year,
+      startMonth: month,
+      customerId: "",
+      articleId: "",
+      hours: field === "hours" ? num : currentHours,
+      amount: field === "amount" ? num : currentAmount,
+    });
   }
 
   return (
@@ -88,6 +117,24 @@ export default function BudgetPage() {
             <h2 className="text-lg font-semibold flex items-center gap-2">
               Utkast <Badge variant="secondary">{drafts.length}</Badge>
             </h2>
+            <div className="flex items-center gap-2">
+              {(() => {
+                const draftCustomers = new Map<string, string>();
+                for (const d of drafts) {
+                  if (!draftCustomers.has(d.customerId)) draftCustomers.set(d.customerId, d.customer.name);
+                }
+                return Array.from(draftCustomers.entries()).map(([id, name]) => (
+                  <Button
+                    key={id}
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setDeleteCustomer({ id, name, status: "DRAFT" })}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    {name}
+                  </Button>
+                ));
+              })()}
             <Dialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="sm">Publicera</Button>
@@ -107,6 +154,7 @@ export default function BudgetPage() {
                 </Button>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -118,6 +166,7 @@ export default function BudgetPage() {
                   <th className="p-2 text-right font-medium">Timmar</th>
                   <th className="p-2 text-right font-medium">Belopp</th>
                   <th className="p-2 text-center font-medium">Version</th>
+                  <th className="p-2 w-10"></th>
                 </tr>
               </thead>
               <tbody>
@@ -130,12 +179,27 @@ export default function BudgetPage() {
                         type="number"
                         className="w-20 h-7 text-right text-xs ml-auto"
                         defaultValue={Number(entry.hours)}
-                        onBlur={(e) => handleHoursChange(entry.id, e.target.value)}
+                        onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
                       />
                     </td>
-                    <td className="p-2 text-right">{Number(entry.amount).toLocaleString("sv-SE")} kr</td>
+                    <td className="p-2 text-right">
+                      <Input
+                        type="number"
+                        className="w-24 h-7 text-right text-xs ml-auto"
+                        defaultValue={Number(entry.amount)}
+                        onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
+                      />
+                    </td>
                     <td className="p-2 text-center">
                       <Badge variant="outline">v{entry.version}</Badge>
+                    </td>
+                    <td className="p-2 text-center">
+                      <button
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        onClick={() => setDeleteEntryId(entry.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -162,6 +226,10 @@ export default function BudgetPage() {
                 <Button variant="destructive" size="sm" onClick={() => setEndDialogCustomer({ id, name })}>
                   Avsluta
                 </Button>
+                <Button variant="ghost" size="sm" onClick={() => setDeleteCustomer({ id, name, status: "PUBLISHED" })}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Ta bort
+                </Button>
               </div>
             ))}
           </div>
@@ -176,6 +244,7 @@ export default function BudgetPage() {
                 <th className="p-2 text-right font-medium">Timmar</th>
                 <th className="p-2 text-right font-medium">Belopp</th>
                 <th className="p-2 text-center font-medium">Version</th>
+                <th className="p-2 w-10"></th>
               </tr>
             </thead>
             <tbody>
@@ -190,10 +259,32 @@ export default function BudgetPage() {
                       : <Badge variant="default">Pågående</Badge>
                     }
                   </td>
-                  <td className="p-2 text-right">{Number(entry.hours)}</td>
-                  <td className="p-2 text-right">{Number(entry.amount).toLocaleString("sv-SE")} kr</td>
+                  <td className="p-2 text-right">
+                    <Input
+                      type="number"
+                      className="w-20 h-7 text-right text-xs ml-auto"
+                      defaultValue={Number(entry.hours)}
+                      onBlur={(e) => handleFieldChange(entry.id, "hours", e.target.value, Number(entry.hours), Number(entry.amount))}
+                    />
+                  </td>
+                  <td className="p-2 text-right">
+                    <Input
+                      type="number"
+                      className="w-24 h-7 text-right text-xs ml-auto"
+                      defaultValue={Number(entry.amount)}
+                      onBlur={(e) => handleFieldChange(entry.id, "amount", e.target.value, Number(entry.hours), Number(entry.amount))}
+                    />
+                  </td>
                   <td className="p-2 text-center">
                     <Badge variant="secondary">v{entry.version}</Badge>
+                  </td>
+                  <td className="p-2 text-center">
+                    <button
+                      className="text-muted-foreground hover:text-destructive transition-colors"
+                      onClick={() => setDeleteEntryId(entry.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -231,6 +322,56 @@ export default function BudgetPage() {
             disabled={endBudgetMutation.isPending}
           >
             {endBudgetMutation.isPending ? "Avslutar..." : "Bekräfta avslut"}
+          </Button>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete single entry confirmation dialog */}
+      <Dialog open={!!deleteEntryId} onOpenChange={(open) => !open && setDeleteEntryId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ta bort budgetpost?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Denna budgetpost kommer att tas bort permanent.
+          </p>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              if (deleteEntryId) deleteMutation.mutate({ id: deleteEntryId });
+            }}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? "Tar bort..." : "Bekräfta borttagning"}
+          </Button>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete by customer confirmation dialog */}
+      <Dialog open={!!deleteCustomer} onOpenChange={(open) => !open && setDeleteCustomer(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ta bort budgetposter?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Alla {deleteCustomer?.status === "DRAFT" ? "utkast" : "publicerade"} budgetposter för{" "}
+            <strong>{deleteCustomer?.name}</strong> i {formatPeriod(year, month)} kommer att tas bort permanent.
+          </p>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              if (deleteCustomer) {
+                deleteByCustomerMutation.mutate({
+                  customerId: deleteCustomer.id,
+                  startYear: year,
+                  startMonth: month,
+                  status: deleteCustomer.status,
+                });
+              }
+            }}
+            disabled={deleteByCustomerMutation.isPending}
+          >
+            {deleteByCustomerMutation.isPending ? "Tar bort..." : "Bekräfta borttagning"}
           </Button>
         </DialogContent>
       </Dialog>

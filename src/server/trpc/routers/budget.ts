@@ -174,6 +174,32 @@ export const budgetRouter = router({
       });
     }),
 
+  delete: protectedProcedure
+    .use(requireRole("ADMIN", "BYRALEDNING", "TEAM_LEAD"))
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.db.budgetEntry.delete({ where: { id: input.id } });
+    }),
+
+  deleteByCustomer: protectedProcedure
+    .use(requireRole("ADMIN", "BYRALEDNING"))
+    .input(z.object({
+      customerId: z.string(),
+      startYear: z.number(),
+      startMonth: z.number().min(1).max(12),
+      status: z.enum(["DRAFT", "PUBLISHED"]).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const where: { customerId: string; startYear: number; startMonth: number; status?: "DRAFT" | "PUBLISHED" } = {
+        customerId: input.customerId,
+        startYear: input.startYear,
+        startMonth: input.startMonth,
+      };
+      if (input.status) where.status = input.status;
+      const result = await ctx.db.budgetEntry.deleteMany({ where });
+      return { deleted: result.count };
+    }),
+
   importFile: protectedProcedure
     .use(requireRole("ADMIN", "BYRALEDNING", "TEAM_LEAD"))
     .input(z.object({
