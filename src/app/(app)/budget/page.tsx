@@ -188,14 +188,12 @@ export default function BudgetPage() {
                     <td className="p-2">
                       <BudgetCell
                         value={Number(entry.hours)}
-                        step={0.5}
                         onSave={(v) => handleFieldSave(entry.id, "hours", v, Number(entry.hours), Number(entry.amount))}
                       />
                     </td>
                     <td className="p-2">
                       <BudgetCell
                         value={Number(entry.amount)}
-                        step={100}
                         onSave={(v) => handleFieldSave(entry.id, "amount", v, Number(entry.hours), Number(entry.amount))}
                       />
                     </td>
@@ -316,14 +314,12 @@ export default function BudgetPage() {
                           <td className="px-3 py-1.5">
                             <BudgetCell
                               value={Number(entry.hours)}
-                              step={0.5}
                               onSave={(v) => handleFieldSave(entry.id, "hours", v, Number(entry.hours), Number(entry.amount))}
                             />
                           </td>
                           <td className="px-3 py-1.5">
                             <BudgetCell
                               value={Number(entry.amount)}
-                              step={100}
                               onSave={(v) => handleFieldSave(entry.id, "amount", v, Number(entry.hours), Number(entry.amount))}
                             />
                           </td>

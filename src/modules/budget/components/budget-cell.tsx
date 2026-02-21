@@ -2,11 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Minus, Plus } from "lucide-react";
 
 interface BudgetCellProps {
   value: number;
-  step?: number;
   decimals?: number;
   onSave: (value: number) => void;
   className?: string;
@@ -65,7 +63,7 @@ function evaluateExpression(input: string): number {
  *
  * Saves on Enter or blur. Escape reverts.
  */
-export function BudgetCell({ value, step = 0.5, decimals = 2, onSave, className }: BudgetCellProps) {
+export function BudgetCell({ value, decimals = 2, onSave, className }: BudgetCellProps) {
   const [displayValue, setDisplayValue] = useState(formatDisplay(value, decimals));
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -123,30 +121,6 @@ export function BudgetCell({ value, step = 0.5, decimals = 2, onSave, className 
       setDisplayValue(formatDisplay(savedRef.current, decimals));
       inputRef.current?.blur();
     }
-    if (e.key === "ArrowUp" && !isExpressionInput(editText)) {
-      e.preventDefault();
-      const num = parseFloat(editText.replace(",", ".")) || 0;
-      const newVal = num + step;
-      setEditText(newVal.toString().replace(".", ","));
-      commitValue(newVal);
-    }
-    if (e.key === "ArrowDown" && !isExpressionInput(editText)) {
-      e.preventDefault();
-      const num = parseFloat(editText.replace(",", ".")) || 0;
-      const newVal = num - step;
-      setEditText(newVal.toString().replace(".", ","));
-      commitValue(newVal);
-    }
-  }
-
-  function increment() {
-    const current = savedRef.current;
-    commitValue(current + step);
-  }
-
-  function decrement() {
-    const current = savedRef.current;
-    commitValue(current - step);
   }
 
   const showingFormula = isEditing && isExpressionInput(editText);
@@ -154,27 +128,18 @@ export function BudgetCell({ value, step = 0.5, decimals = 2, onSave, className 
   return (
     <div
       className={cn(
-        "group/cell flex items-center rounded-md border border-transparent transition-colors",
+        "rounded-md border border-transparent transition-colors",
         isEditing && "border-ring ring-ring/50 ring-[2px]",
         !isEditing && "hover:border-input",
         className,
       )}
     >
-      <button
-        type="button"
-        tabIndex={-1}
-        onClick={decrement}
-        className="shrink-0 h-7 w-6 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 focus:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-        aria-label="Minska"
-      >
-        <Minus className="h-3 w-3" />
-      </button>
       <input
         ref={inputRef}
         type="text"
         inputMode="text"
         className={cn(
-          "h-7 w-full min-w-0 bg-transparent text-right text-xs outline-none px-1 tabular-nums",
+          "h-7 w-full min-w-0 bg-transparent text-right text-xs outline-none px-2 tabular-nums",
           showingFormula && "text-blue-600 font-mono",
         )}
         value={isEditing ? editText : displayValue}
@@ -183,15 +148,6 @@ export function BudgetCell({ value, step = 0.5, decimals = 2, onSave, className 
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
       />
-      <button
-        type="button"
-        tabIndex={-1}
-        onClick={increment}
-        className="shrink-0 h-7 w-6 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 focus:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-        aria-label="Öka"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
     </div>
   );
 }
